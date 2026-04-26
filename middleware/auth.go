@@ -381,6 +381,11 @@ func TokenAuth() func(c *gin.Context) {
 
 		userGroup := userCache.Group
 		tokenGroup := token.Group
+		// nycatai: 支持反代层通过 X-Group-Override header 覆写分组
+		// 仅当 header 非空且 token 自身未指定分组时生效
+		if groupOverride := c.GetHeader("X-Group-Override"); groupOverride != "" && tokenGroup == "" {
+			tokenGroup = groupOverride
+		}
 		if tokenGroup != "" {
 			// check common.UserUsableGroups[userGroup]
 			if _, ok := service.GetUserUsableGroups(userGroup)[tokenGroup]; !ok {
