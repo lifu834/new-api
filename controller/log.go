@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"fmt"
 	"net/http"
 	"strconv"
 
@@ -78,6 +79,7 @@ func GetLogByKey(c *gin.Context) {
 		})
 		return
 	}
+	common.SysLog(fmt.Sprintf("token log lookup: token_id=%d request_id=%s client_ip=%s", tokenId, c.GetString(common.RequestIdKey), c.ClientIP()))
 	logs, err := model.GetLogByTokenId(tokenId)
 	if err != nil {
 		c.JSON(200, gin.H{

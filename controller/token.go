@@ -146,6 +146,7 @@ func GetTokenUsage(c *gin.Context) {
 	if expiredAt == -1 {
 		expiredAt = 0
 	}
+	common.SysLog(fmt.Sprintf("token usage lookup: token_id=%d request_id=%s client_ip=%s", token.Id, c.GetString(common.RequestIdKey), c.ClientIP()))
 
 	c.JSON(http.StatusOK, gin.H{
 		"code":    true,

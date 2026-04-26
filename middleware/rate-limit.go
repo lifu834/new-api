@@ -203,3 +203,51 @@ func SearchRateLimit() func(c *gin.Context) {
 	}
 	return userRateLimitFactory(common.SearchRateLimitNum, common.SearchRateLimitDuration, "SR")
 }
+
+// SetupRateLimit is a dedicated limiter for unauthenticated setup endpoints.
+// It intentionally reuses the critical rate limit budget to avoid introducing
+// new environment knobs while still ensuring setup cannot be brute-forced at
+// high frequency.
+func SetupRateLimit() func(c *gin.Context) {
+	if common.CriticalRateLimitEnable {
+		return rateLimitFactory(common.CriticalRateLimitNum, common.CriticalRateLimitDuration, "SU")
+	}
+	return defNext
+}
+
+// TokenReadOnlyRateLimit limits read-only token lookup endpoints by token_id
+// after TokenAuthReadOnly has identified the token. This reduces the value of
+// IP rotation against token query endpoints while keeping the integration shape
+// unchanged for static frontends.
+func TokenReadOnlyRateLimit() func(c *gin.Context) {
+	if !common.CriticalRateLimitEnable {
+		return defNext
+	}
+	if common.RedisEnabled {
+		return func(c *gin.Context) {
+			tokenId := c.GetInt("token_id")
+			if tokenId == 0 {
+				c.Status(http.StatusUnauthorized)
+				c.Abort()
+				return
+			}
+			key := fmt.Sprintf("rateLimit:TR:token:%d", tokenId)
+			userRedisRateLimiter(c, common.CriticalRateLimitNum, common.CriticalRateLimitDuration, key)
+		}
+	}
+	inMemoryRateLimiter.Init(common.RateLimitKeyExpirationDuration)
+	return func(c *gin.Context) {
+		tokenId := c.GetInt("token_id")
+		if tokenId == 0 {
+			c.Status(http.StatusUnauthorized)
+			c.Abort()
+			return
+		}
+		key := fmt.Sprintf("TR:token:%d", tokenId)
+		if !inMemoryRateLimiter.Request(key, common.CriticalRateLimitNum, common.CriticalRateLimitDuration) {
+			c.Status(http.StatusTooManyRequests)
+			c.Abort()
+			return
+		}
+	}
+}
