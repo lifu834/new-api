@@ -381,11 +381,6 @@ func TokenAuth() func(c *gin.Context) {
 
 		userGroup := userCache.Group
 		tokenGroup := token.Group
-		// nycatai: 支持反代层通过 X-Group-Override header 覆写分组
-		// 仅当 header 非空且 token 自身未指定分组时生效
-		if groupOverride := c.GetHeader("X-Group-Override"); groupOverride != "" && tokenGroup == "" {
-			tokenGroup = groupOverride
-		}
 		if tokenGroup != "" {
 			// check common.UserUsableGroups[userGroup]
 			if _, ok := service.GetUserUsableGroups(userGroup)[tokenGroup]; !ok {
@@ -401,6 +396,15 @@ func TokenAuth() func(c *gin.Context) {
 			}
 			userGroup = tokenGroup
 		}
+
+		// nycatai: 路径前缀分组覆写，优先级高于 token 自身分组
+		// 安全性由 Tailscale 端口限源保证，外部无法直接发送此 header
+		if groupOverride := c.GetHeader("X-Group-Override"); groupOverride != "" {
+			if ratio_setting.ContainsGroupRatio(groupOverride) {
+				userGroup = groupOverride
+			}
+		}
+
 		common.SetContextKey(c, constant.ContextKeyUsingGroup, userGroup)
 
 		err = SetupContextForToken(c, token, parts...)
