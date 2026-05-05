@@ -411,6 +411,13 @@ func TokenAuth() func(c *gin.Context) {
 		if err != nil {
 			return
 		}
+
+		if groupOverride := c.GetHeader("X-Group-Override"); groupOverride != "" {
+			if ratio_setting.ContainsGroupRatio(groupOverride) {
+				common.SetContextKey(c, constant.ContextKeyTokenGroup, groupOverride)
+			}
+		}
+
 		c.Next()
 	}
 }
