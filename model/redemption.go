@@ -152,6 +152,7 @@ func Redeem(key string, userId int) (quota int, err error) {
 		return 0, ErrRedeemFailed
 	}
 	RecordLog(userId, LogTypeTopup, fmt.Sprintf("通过兑换码充值 %s，兑换码ID %d", logger.LogQuota(redemption.Quota), redemption.Id))
+	GiveAffRebate(userId, redemption.Quota) // nycatai: 持续返佣
 	return redemption.Quota, nil
 }
 

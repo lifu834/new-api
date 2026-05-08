@@ -100,6 +100,7 @@ func Recharge(referenceId string, customerId string) (err error) {
 	}
 
 	RecordLog(topUp.UserId, LogTypeTopup, fmt.Sprintf("使用在线充值成功，充值金额: %v，支付金额：%d", logger.FormatQuota(int(quota)), topUp.Amount))
+	GiveAffRebate(topUp.UserId, int(quota)) // nycatai: 持续返佣
 
 	return nil
 }

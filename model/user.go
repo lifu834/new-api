@@ -328,6 +328,34 @@ func HardDeleteUserById(id int) error {
 	return err
 }
 
+
+// nycatai: 兑换/充值后给邀请人返佣
+func GiveAffRebate(userId int, quota int) {
+	if common.AffRebatePercent <= 0 || quota <= 0 {
+		return
+	}
+	var user User
+	err := DB.Select("inviter_id").First(&user, userId).Error
+	if err != nil || user.InviterId == 0 {
+		return
+	}
+	rebate := quota * common.AffRebatePercent / 100
+	if rebate <= 0 {
+		return
+	}
+	inviter, err := GetUserById(user.InviterId, true)
+	if err != nil {
+		return
+	}
+	inviter.AffQuota += rebate
+	inviter.AffHistoryQuota += rebate
+	if err := DB.Save(inviter).Error; err != nil {
+		common.SysError("aff rebate failed: " + err.Error())
+		return
+	}
+	RecordLog(user.InviterId, LogTypeSystem, fmt.Sprintf("邀请返佣 %s (来自用户 #%d 的充值)", logger.LogQuota(rebate), userId))
+}
+
 func inviteUser(inviterId int) (err error) {
 	user, err := GetUserById(inviterId, true)
 	if err != nil {
