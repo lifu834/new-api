@@ -336,20 +336,17 @@ func GiveAffRebate(userId int, quota int) {
 	}
 	var user User
 	err := DB.Select("inviter_id").First(&user, userId).Error
-	if err != nil || user.InviterId == 0 {
+	if err != nil || user.InviterId == 0 || user.InviterId == userId {
 		return
 	}
 	rebate := quota * common.AffRebatePercent / 100
 	if rebate <= 0 {
 		return
 	}
-	inviter, err := GetUserById(user.InviterId, true)
-	if err != nil {
-		return
-	}
-	inviter.AffQuota += rebate
-	inviter.AffHistoryQuota += rebate
-	if err := DB.Save(inviter).Error; err != nil {
+	if err := DB.Model(&User{}).Where("id = ?", user.InviterId).Updates(map[string]any{
+		"aff_quota":   gorm.Expr("aff_quota + ?", rebate),
+		"aff_history": gorm.Expr("aff_history + ?", rebate),
+	}).Error; err != nil {
 		common.SysError("aff rebate failed: " + err.Error())
 		return
 	}
