@@ -843,6 +843,8 @@ func CreateUser(c *gin.Context) {
 type ManageRequest struct {
 	Id     int    `json:"id"`
 	Action string `json:"action"`
+	Value  int    `json:"value"`
+	Mode   string `json:"mode"`
 }
 
 // ManageUser Only admin user can do this
