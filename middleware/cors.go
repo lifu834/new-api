@@ -27,6 +27,10 @@ func CORS() gin.HandlerFunc {
 		if strings.HasSuffix(origin, ".nycatai.com") && strings.HasPrefix(origin, "https://") {
 			return true
 		}
+		// Tailscale 内网管理面板访问
+		if strings.HasPrefix(origin, "http://100.") {
+			return true
+		}
 		return false
 	}
 	return cors.New(config)
