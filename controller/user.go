@@ -27,6 +27,9 @@ import (
 type LoginRequest struct {
 	Username string `json:"username"`
 	Password string `json:"password"`
+	// 登录自适应 PoW（仅当该用户名连续失败 ≥ 阈值时才需要；默认功能关闭）
+	PowChallengeID string `json:"pow_challenge_id"`
+	PowNonce       string `json:"pow_nonce"`
 }
 
 func Login(c *gin.Context) {
@@ -46,17 +49,35 @@ func Login(c *gin.Context) {
 		common.ApiErrorI18n(c, i18n.MsgInvalidParams)
 		return
 	}
+	// 反撞库自适应 PoW：仅当开启且该用户名近期失败 ≥ 阈值时，要求带有效 PoW。
+	// 默认关闭（LoginPowEnabled=false）→ 整段跳过，登录行为与原先完全一致。
+	if common.LoginPowEnabled && service.LoginFailCount(username) >= common.LoginPowFailThreshold {
+		if !service.VerifyLoginPowSolution(loginRequest.PowChallengeID, loginRequest.PowNonce) {
+			c.JSON(http.StatusOK, gin.H{
+				"success":      false,
+				"pow_required": true,
+				"message":      "为防止暴力破解，请完成安全验证后重试",
+			})
+			return
+		}
+	}
 	user := model.User{
 		Username: username,
 		Password: password,
 	}
 	err = user.ValidateAndFill()
 	if err != nil {
+		if common.LoginPowEnabled {
+			service.IncrLoginFail(username)
+		}
 		c.JSON(http.StatusOK, gin.H{
 			"message": err.Error(),
 			"success": false,
 		})
 		return
+	}
+	if common.LoginPowEnabled {
+		service.ResetLoginFail(username)
 	}
 
 	// 检查是否启用2FA

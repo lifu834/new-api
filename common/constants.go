@@ -186,6 +186,12 @@ var (
 	SearchRateLimitEnable         = true
 	SearchRateLimitNum            = 10
 	SearchRateLimitDuration int64 = 60
+
+	// 登录自适应 PoW（反撞库）：仅当同一用户名连续失败 ≥ 阈值后，才要求该用户名带 PoW。
+	// 默认关闭；对正常用户（密码一次输对）完全无感。难度=前导零 bit 数。
+	LoginPowEnabled       = false
+	LoginPowDifficulty    = 15
+	LoginPowFailThreshold = 5
 )
 
 var RateLimitKeyExpirationDuration = 20 * time.Minute

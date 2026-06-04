@@ -122,6 +122,11 @@ func InitEnv() {
 	CriticalRateLimitNum = GetEnvOrDefault("CRITICAL_RATE_LIMIT", 20)
 	CriticalRateLimitDuration = int64(GetEnvOrDefault("CRITICAL_RATE_LIMIT_DURATION", 20*60))
 
+	// 登录自适应 PoW（默认关，对正常用户无感；开启需配合前端 pow.ts）
+	LoginPowEnabled = GetEnvOrDefaultBool("LOGIN_POW_ENABLED", false)
+	LoginPowDifficulty = GetEnvOrDefault("LOGIN_POW_DIFFICULTY", 15)
+	LoginPowFailThreshold = GetEnvOrDefault("LOGIN_POW_FAIL_THRESHOLD", 5)
+
 	SearchRateLimitEnable = GetEnvOrDefaultBool("SEARCH_RATE_LIMIT_ENABLE", true)
 	SearchRateLimitNum = GetEnvOrDefault("SEARCH_RATE_LIMIT", 10)
 	SearchRateLimitDuration = int64(GetEnvOrDefault("SEARCH_RATE_LIMIT_DURATION", 60))

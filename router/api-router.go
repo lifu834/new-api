@@ -51,9 +51,11 @@ func SetApiRouter(router *gin.Engine) {
 		apiRouter.POST("/waffo/webhook", controller.WaffoWebhook)
 		//apiRouter.POST("/waffo-pancake/webhook", controller.WaffoPancakeWebhook)
 
-
 		// Universal secure verification routes
 		apiRouter.POST("/verify", middleware.UserAuth(), middleware.CriticalRateLimit(), controller.UniversalVerify)
+
+		// 登录自适应 PoW 挑战（公开；关闭时返回 enabled:false）
+		apiRouter.GET("/pow/challenge", middleware.CriticalRateLimit(), controller.GetLoginPowChallenge)
 
 		userRoute := apiRouter.Group("/user")
 		{
