@@ -67,3 +67,56 @@ func CheckModelRequestRateLimitGroup(jsonStr string) error {
 
 	return nil
 }
+
+// ===== nycatai: 模型并发限制（按用户身份档位，default/enterprise）=====
+
+var ModelConcurrencyLimitEnabled = false
+var ModelConcurrencyLimitCount = 0                // 全局默认最大并发，0 = 不限制
+var ModelConcurrencyLimitGroup = map[string]int{} // 身份分组 -> 最大并发
+var ModelConcurrencyLimitMutex sync.RWMutex
+
+func ModelConcurrencyLimitGroup2JSONString() string {
+	ModelConcurrencyLimitMutex.RLock()
+	defer ModelConcurrencyLimitMutex.RUnlock()
+
+	jsonBytes, err := json.Marshal(ModelConcurrencyLimitGroup)
+	if err != nil {
+		common.SysLog("error marshalling model concurrency limit: " + err.Error())
+	}
+	return string(jsonBytes)
+}
+
+func UpdateModelConcurrencyLimitGroupByJSONString(jsonStr string) error {
+	ModelConcurrencyLimitMutex.Lock()
+	defer ModelConcurrencyLimitMutex.Unlock()
+
+	ModelConcurrencyLimitGroup = make(map[string]int)
+	return json.Unmarshal([]byte(jsonStr), &ModelConcurrencyLimitGroup)
+}
+
+func GetGroupConcurrencyLimit(group string) (int, bool) {
+	ModelConcurrencyLimitMutex.RLock()
+	defer ModelConcurrencyLimitMutex.RUnlock()
+
+	if ModelConcurrencyLimitGroup == nil {
+		return 0, false
+	}
+	v, ok := ModelConcurrencyLimitGroup[group]
+	return v, ok
+}
+
+func CheckModelConcurrencyLimitGroup(jsonStr string) error {
+	m := make(map[string]int)
+	if err := json.Unmarshal([]byte(jsonStr), &m); err != nil {
+		return err
+	}
+	for group, v := range m {
+		if v < 0 {
+			return fmt.Errorf("group %s has negative concurrency value: %d", group, v)
+		}
+		if v > math.MaxInt32 {
+			return fmt.Errorf("group %s concurrency %d exceeds max 2147483647", group, v)
+		}
+	}
+	return nil
+}

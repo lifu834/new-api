@@ -10,6 +10,7 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/common/limiter"
 	"github.com/QuantumNous/new-api/constant"
+	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/setting"
 
 	"github.com/gin-gonic/gin"
@@ -172,15 +173,21 @@ func ModelRequestRateLimit() func(c *gin.Context) {
 			return
 		}
 
+		// nycatai: 管理员豁免限流
+		if userId := c.GetInt("id"); userId != 0 && model.IsAdmin(userId) {
+			c.Next()
+			return
+		}
+
 		// 计算限流参数
 		duration := int64(setting.ModelRequestRateLimitDurationMinutes * 60)
 		totalMaxCount := setting.ModelRequestRateLimitCount
 		successMaxCount := setting.ModelRequestRateLimitSuccessCount
 
-		// 获取分组
-		group := common.GetContextKeyString(c, constant.ContextKeyTokenGroup)
+		// nycatai: 按用户身份档位(default/enterprise)限速，而非路径注入的使用组
+		group := common.GetContextKeyString(c, constant.ContextKeyUserGroup)
 		if group == "" {
-			group = common.GetContextKeyString(c, constant.ContextKeyUserGroup)
+			group = common.GetContextKeyString(c, constant.ContextKeyTokenGroup)
 		}
 
 		//获取分组的限流配置
