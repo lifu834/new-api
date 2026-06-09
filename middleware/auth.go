@@ -398,10 +398,15 @@ func TokenAuth() func(c *gin.Context) {
 		}
 
 		// nycatai: 路径前缀分组覆写，优先级高于 token 自身分组
-		// 安全性由 Tailscale 端口限源保证，外部无法直接发送此 header
+		// 安全由 Tailscale 端口限源 + HK Caddy 剥离客户端头保证；此处再加纵深防御：
+		// override 仅在该用户(真实身份)有权使用该分组时才生效（同 token 分组校验），
+		// 防止 header 万一被透传到后端时越权 route 到更低价的使用组基础价。
+		// identity(ContextKeyUserGroup) 始终为真实 user.Group(见上 WriteContext)，不受 override 影响。
 		if groupOverride := c.GetHeader("X-Group-Override"); groupOverride != "" {
 			if ratio_setting.ContainsGroupRatio(groupOverride) {
-				userGroup = groupOverride
+				if _, ok := service.GetUserUsableGroups(userCache.Group)[groupOverride]; ok {
+					userGroup = groupOverride
+				}
 			}
 		}
 
@@ -414,7 +419,9 @@ func TokenAuth() func(c *gin.Context) {
 
 		if groupOverride := c.GetHeader("X-Group-Override"); groupOverride != "" {
 			if ratio_setting.ContainsGroupRatio(groupOverride) {
-				common.SetContextKey(c, constant.ContextKeyTokenGroup, groupOverride)
+				if _, ok := service.GetUserUsableGroups(userCache.Group)[groupOverride]; ok {
+					common.SetContextKey(c, constant.ContextKeyTokenGroup, groupOverride)
+				}
 			}
 		}
 
