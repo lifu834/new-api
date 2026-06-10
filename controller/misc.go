@@ -264,7 +264,8 @@ func SendEmailVerification(c *gin.Context) {
 		}
 	}
 	if common.EmailAliasRestrictionEnabled {
-		containsSpecialSymbols := strings.Contains(localPart, "+") || strings.Contains(localPart, ".")
+		// 只拦 "+" 子邮箱别名；"." 不拦——qq/163 等大量正常邮箱带点号（gmail 点号等价的旁路由同 IP 注册限制兜底）
+		containsSpecialSymbols := strings.Contains(localPart, "+")
 		if containsSpecialSymbols {
 			c.JSON(http.StatusOK, gin.H{
 				"success": false,

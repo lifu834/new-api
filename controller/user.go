@@ -189,6 +189,18 @@ func Register(c *gin.Context) {
 		common.ApiErrorI18n(c, i18n.MsgUserExists)
 		return
 	}
+	// 同 IP 注册数硬限制（反注册机）。计数失败时放行，不因 DB 抖动误伤注册。
+	clientIp := c.ClientIP()
+	if common.RegisterSameIpLimit > 0 && clientIp != "" {
+		ipCount, countErr := model.CountUsersByRegisterIp(clientIp, common.GetTimestamp()-86400)
+		if countErr != nil {
+			common.SysLog(fmt.Sprintf("CountUsersByRegisterIp error: %v", countErr))
+		} else if ipCount >= int64(common.RegisterSameIpLimit) {
+			common.SysLog(fmt.Sprintf("register blocked by same-ip limit: ip=%s count=%d", clientIp, ipCount))
+			common.ApiError(c, fmt.Errorf("当前网络注册账号过多，请稍后再试或联系管理员"))
+			return
+		}
+	}
 	affCode := user.AffCode // this code is the inviter's code, not the user's own code
 	inviterId, _ := model.GetUserIdByAffCode(affCode)
 	cleanUser := model.User{
@@ -196,6 +208,7 @@ func Register(c *gin.Context) {
 		Password:    user.Password,
 		DisplayName: user.Username,
 		InviterId:   inviterId,
+		RegisterIp:  clientIp,
 		Role:        common.RoleCommonUser, // 明确设置角色为普通用户
 	}
 	if common.EmailVerificationEnabled {

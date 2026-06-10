@@ -127,6 +127,9 @@ func InitEnv() {
 	LoginPowDifficulty = GetEnvOrDefault("LOGIN_POW_DIFFICULTY", 15)
 	LoginPowFailThreshold = GetEnvOrDefault("LOGIN_POW_FAIL_THRESHOLD", 5)
 
+	// 同 IP 注册数硬限制（0=关）
+	RegisterSameIpLimit = GetEnvOrDefault("REGISTER_SAME_IP_LIMIT", 3)
+
 	SearchRateLimitEnable = GetEnvOrDefaultBool("SEARCH_RATE_LIMIT_ENABLE", true)
 	SearchRateLimitNum = GetEnvOrDefault("SEARCH_RATE_LIMIT", 10)
 	SearchRateLimitDuration = int64(GetEnvOrDefault("SEARCH_RATE_LIMIT_DURATION", 60))

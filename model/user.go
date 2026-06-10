@@ -50,6 +50,7 @@ type User struct {
 	Setting          string         `json:"setting" gorm:"type:text;column:setting"`
 	Remark           string         `json:"remark,omitempty" gorm:"type:varchar(255)" validate:"max=255"`
 	StripeCustomer   string         `json:"stripe_customer" gorm:"type:varchar(64);column:stripe_customer;index"`
+	RegisterIp       string         `json:"register_ip,omitempty" gorm:"type:varchar(64);column:register_ip;index;default:''"`
 	CreatedAt        int64          `json:"created_at" gorm:"autoCreateTime;column:created_at"`
 	LastLoginAt      int64          `json:"last_login_at" gorm:"default:0;column:last_login_at"`
 }
@@ -161,6 +162,13 @@ func generateDefaultSidebarConfigForRole(userRole int) string {
 }
 
 // CheckUserExistOrDeleted check if user exist or deleted, if not exist, return false, nil, if deleted or exist, return true, nil
+// CountUsersByRegisterIp 统计某 IP 自 sinceTs 以来的注册账号数（含软删，防注册-删号-再注册绕过）。
+func CountUsersByRegisterIp(ip string, sinceTs int64) (int64, error) {
+	var count int64
+	err := DB.Unscoped().Model(&User{}).Where("register_ip = ? AND created_at >= ?", ip, sinceTs).Count(&count).Error
+	return count, err
+}
+
 func CheckUserExistOrDeleted(username string, email string) (bool, error) {
 	var user User
 

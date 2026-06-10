@@ -192,6 +192,10 @@ var (
 	LoginPowEnabled       = false
 	LoginPowDifficulty    = 15
 	LoginPowFailThreshold = 5
+
+	// 同 IP 注册数硬限制（反注册机）：同一客户端 IP 24h 内注册数达到阈值后拒绝新注册。
+	// 0 = 关闭。注意 CGNAT/校园网共享出口可能误伤，阈值不宜过低。
+	RegisterSameIpLimit = 3
 )
 
 var RateLimitKeyExpirationDuration = 20 * time.Minute
