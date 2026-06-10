@@ -1,6 +1,7 @@
 package openai
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -12,6 +13,7 @@ import (
 	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/relay/channel/openrouter"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	relayconstant "github.com/QuantumNous/new-api/relay/constant"
 	"github.com/QuantumNous/new-api/relay/helper"
 	"github.com/QuantumNous/new-api/service"
 
@@ -557,6 +559,18 @@ func preConsumeUsage(ctx *gin.Context, info *relaycommon.RelayInfo, usage *dto.R
 	return err
 }
 
+// imageResponseHasData reports whether an images-API response body carries at
+// least one item in data[].
+func imageResponseHasData(responseBody []byte) bool {
+	var imageResp struct {
+		Data []json.RawMessage `json:"data"`
+	}
+	if err := common.Unmarshal(responseBody, &imageResp); err != nil {
+		return false
+	}
+	return len(imageResp.Data) > 0
+}
+
 func OpenaiHandlerWithUsage(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Response) (*dto.Usage, *types.NewAPIError) {
 	defer service.CloseResponseBodyGracefully(resp)
 
@@ -569,6 +583,19 @@ func OpenaiHandlerWithUsage(c *gin.Context, info *relaycommon.RelayInfo, resp *h
 	err = common.Unmarshal(responseBody, &usageResp)
 	if err != nil {
 		return nil, types.NewOpenAIError(err, types.ErrorCodeBadResponseBody, http.StatusInternalServerError)
+	}
+
+	// Some upstreams answer image requests with HTTP 200 but an empty data[]
+	// (soft failure, e.g. exhausted account pools). Reject before writing to
+	// the client so the request can be retried on another channel and is not billed.
+	if info.RelayMode == relayconstant.RelayModeImagesGenerations || info.RelayMode == relayconstant.RelayModeImagesEdits {
+		if !imageResponseHasData(responseBody) {
+			snippet := string(responseBody)
+			if len(snippet) > 300 {
+				snippet = snippet[:300]
+			}
+			return nil, types.NewOpenAIError(fmt.Errorf("upstream returned HTTP 200 without image data: %s", snippet), types.ErrorCodeBadResponseBody, http.StatusBadGateway)
+		}
 	}
 
 	// 写入新的 response body

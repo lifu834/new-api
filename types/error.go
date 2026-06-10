@@ -205,7 +205,20 @@ func (e *NewAPIError) ToOpenAIError() OpenAIError {
 		result.Message = common.MaskSensitiveInfo(result.Message)
 	}
 	if result.Message == "" {
-		result.Message = string(e.errorType)
+		// Upstream error bodies that fail to parse (e.g. Cloudflare 524 HTML
+		// pages) leave an empty message; fall back to the wrapped error so
+		// clients see more than a bare error-type label.
+		if msg := e.MaskSensitiveError(); msg != "" {
+			result.Message = msg
+		} else {
+			result.Message = string(e.errorType)
+		}
+	}
+	if result.Type == "" {
+		result.Type = string(e.errorType)
+	}
+	if result.Code == nil || result.Code == "" {
+		result.Code = string(e.errorCode)
 	}
 	return result
 }
@@ -234,7 +247,16 @@ func (e *NewAPIError) ToClaudeError() ClaudeError {
 		result.Message = common.MaskSensitiveInfo(result.Message)
 	}
 	if result.Message == "" {
-		result.Message = string(e.errorType)
+		// Same fallback as ToOpenAIError: prefer the wrapped error over a
+		// bare error-type label when the upstream message is empty.
+		if msg := e.MaskSensitiveError(); msg != "" {
+			result.Message = msg
+		} else {
+			result.Message = string(e.errorType)
+		}
+	}
+	if result.Type == "" {
+		result.Type = string(e.errorType)
 	}
 	return result
 }
