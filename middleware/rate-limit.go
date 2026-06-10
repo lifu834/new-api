@@ -108,6 +108,55 @@ func CriticalRateLimit() func(c *gin.Context) {
 	return defNext
 }
 
+// LoginRateLimit / RegisterRateLimit / EmailOpsRateLimit split the old shared
+// "CT" bucket (ratelimit-antibot-redesign §5.1): one endpoint class can no
+// longer exhaust the budget of every critical operation behind a NAT/CGNAT IP.
+// Thresholds are flood-level; the real gates are PoW / email code / auth.
+func LoginRateLimit() func(c *gin.Context) {
+	if common.CriticalRateLimitEnable {
+		return rateLimitFactory(common.LoginRateLimitNum, common.LoginRateLimitDuration, "LOGIN")
+	}
+	return defNext
+}
+
+func RegisterRateLimit() func(c *gin.Context) {
+	if common.CriticalRateLimitEnable {
+		return rateLimitFactory(common.RegisterRateLimitNum, common.RegisterRateLimitDuration, "REG")
+	}
+	return defNext
+}
+
+func EmailOpsRateLimit() func(c *gin.Context) {
+	if common.CriticalRateLimitEnable {
+		return rateLimitFactory(common.EmailOpsRateLimitNum, common.EmailOpsRateLimitDuration, "EMAIL")
+	}
+	return defNext
+}
+
+// TokenKeyRateLimit / BatchKeysRateLimit / PaymentRateLimit are keyed by user
+// ID (must be mounted after UserAuth), so users sharing an IP no longer
+// contend for one bucket (§5.2).
+func TokenKeyRateLimit() func(c *gin.Context) {
+	if common.CriticalRateLimitEnable {
+		return userRateLimitFactory(common.TokenKeyRateLimitNum, common.TokenKeyRateLimitDuration, "TKEY")
+	}
+	return defNext
+}
+
+func BatchKeysRateLimit() func(c *gin.Context) {
+	if common.CriticalRateLimitEnable {
+		return userRateLimitFactory(common.BatchKeysRateLimitNum, common.BatchKeysRateLimitDuration, "TKEYB")
+	}
+	return defNext
+}
+
+func PaymentRateLimit() func(c *gin.Context) {
+	if common.CriticalRateLimitEnable {
+		return userRateLimitFactory(common.PaymentRateLimitNum, common.PaymentRateLimitDuration, "PAY")
+	}
+	return defNext
+}
+
 func DownloadRateLimit() func(c *gin.Context) {
 	return rateLimitFactory(common.DownloadRateLimitNum, common.DownloadRateLimitDuration, "DW")
 }
