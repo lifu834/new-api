@@ -176,6 +176,27 @@ var (
 	CriticalRateLimitNum            = 20
 	CriticalRateLimitDuration int64 = 20 * 60
 
+	// 拆桶（ratelimit-antibot-redesign §5.1）：login/register 等不再与其他关键操作
+	// 共用 "CT" 桶，单类端点刷不爆全部关键操作。阈值为洪水级，真闸在 PoW/邮箱码。
+	LoginRateLimitNum            = 120
+	LoginRateLimitDuration int64 = 10 * 60
+
+	RegisterRateLimitNum            = 60
+	RegisterRateLimitDuration int64 = 60 * 60
+
+	EmailOpsRateLimitNum            = 60
+	EmailOpsRateLimitDuration int64 = 60 * 60
+
+	// 已登录端点按 user 维度限（§5.2）：CGNAT 共享 IP 的用户互不挤兑
+	TokenKeyRateLimitNum            = 60
+	TokenKeyRateLimitDuration int64 = 60
+
+	BatchKeysRateLimitNum            = 30
+	BatchKeysRateLimitDuration int64 = 60
+
+	PaymentRateLimitNum            = 20
+	PaymentRateLimitDuration int64 = 60
+
 	UploadRateLimitNum            = 10
 	UploadRateLimitDuration int64 = 60
 

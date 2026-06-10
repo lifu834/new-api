@@ -122,6 +122,20 @@ func InitEnv() {
 	CriticalRateLimitNum = GetEnvOrDefault("CRITICAL_RATE_LIMIT", 20)
 	CriticalRateLimitDuration = int64(GetEnvOrDefault("CRITICAL_RATE_LIMIT_DURATION", 20*60))
 
+	// 拆桶后的各端点类独立阈值（开关沿用 CRITICAL_RATE_LIMIT_ENABLE）
+	LoginRateLimitNum = GetEnvOrDefault("LOGIN_RATE_LIMIT", 120)
+	LoginRateLimitDuration = int64(GetEnvOrDefault("LOGIN_RATE_LIMIT_DURATION", 10*60))
+	RegisterRateLimitNum = GetEnvOrDefault("REGISTER_RATE_LIMIT", 60)
+	RegisterRateLimitDuration = int64(GetEnvOrDefault("REGISTER_RATE_LIMIT_DURATION", 60*60))
+	EmailOpsRateLimitNum = GetEnvOrDefault("EMAIL_OPS_RATE_LIMIT", 60)
+	EmailOpsRateLimitDuration = int64(GetEnvOrDefault("EMAIL_OPS_RATE_LIMIT_DURATION", 60*60))
+	TokenKeyRateLimitNum = GetEnvOrDefault("TOKEN_KEY_RATE_LIMIT", 60)
+	TokenKeyRateLimitDuration = int64(GetEnvOrDefault("TOKEN_KEY_RATE_LIMIT_DURATION", 60))
+	BatchKeysRateLimitNum = GetEnvOrDefault("BATCH_KEYS_RATE_LIMIT", 30)
+	BatchKeysRateLimitDuration = int64(GetEnvOrDefault("BATCH_KEYS_RATE_LIMIT_DURATION", 60))
+	PaymentRateLimitNum = GetEnvOrDefault("PAYMENT_RATE_LIMIT", 20)
+	PaymentRateLimitDuration = int64(GetEnvOrDefault("PAYMENT_RATE_LIMIT_DURATION", 60))
+
 	// 登录自适应 PoW（默认关，对正常用户无感；开启需配合前端 pow.ts）
 	LoginPowEnabled = GetEnvOrDefaultBool("LOGIN_POW_ENABLED", false)
 	LoginPowDifficulty = GetEnvOrDefault("LOGIN_POW_DIFFICULTY", 15)
