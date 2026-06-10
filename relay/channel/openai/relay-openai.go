@@ -588,13 +588,15 @@ func OpenaiHandlerWithUsage(c *gin.Context, info *relaycommon.RelayInfo, resp *h
 	// Some upstreams answer image requests with HTTP 200 but an empty data[]
 	// (soft failure, e.g. exhausted account pools). Reject before writing to
 	// the client so the request can be retried on another channel and is not billed.
+	// Must NOT use ErrorCodeBadResponseBody here: it is on the always-skip-retry
+	// list (setting/operation_setting/status_code_ranges.go), which would prevent failover.
 	if info.RelayMode == relayconstant.RelayModeImagesGenerations || info.RelayMode == relayconstant.RelayModeImagesEdits {
 		if !imageResponseHasData(responseBody) {
 			snippet := string(responseBody)
 			if len(snippet) > 300 {
 				snippet = snippet[:300]
 			}
-			return nil, types.NewOpenAIError(fmt.Errorf("upstream returned HTTP 200 without image data: %s", snippet), types.ErrorCodeBadResponseBody, http.StatusBadGateway)
+			return nil, types.NewOpenAIError(fmt.Errorf("upstream returned HTTP 200 without image data: %s", snippet), types.ErrorCodeEmptyResponse, http.StatusBadGateway)
 		}
 	}
 
