@@ -376,9 +376,9 @@ func inviteUser(inviterId int) (err error) {
 }
 
 func (user *User) TransferAffQuotaToQuota(quota int) error {
-	// 检查quota是否小于最小额度
-	if float64(quota) < common.QuotaPerUnit {
-		return fmt.Errorf("转移额度最小为%s！", logger.LogQuota(int(common.QuotaPerUnit)))
+	// 只要有可用返佣额度即可转入（>0），不再限制最低额度
+	if quota <= 0 {
+		return errors.New("划转额度必须大于 0！")
 	}
 
 	// 开始数据库事务
@@ -420,6 +420,10 @@ func (user *User) TransferAffQuotaToQuota(quota int) error {
 	if err := invalidateUserCache(user.Id); err != nil {
 		common.SysLog("aff transfer: invalidate user cache failed: " + err.Error())
 	}
+
+	// 审计：记录返现（返佣额度划转到余额）。用 LogTypeSystem 与 GiveAffRebate 的返佣产生日志保持同一类别、
+	// 且不污染充值营收统计；ops aff-audit 按 content 关键字「返佣」即可检索到产生+划转两类事件。
+	RecordLog(user.Id, LogTypeSystem, fmt.Sprintf("划转返佣额度 %s 到余额", logger.LogQuota(quota)))
 	return nil
 }
 
