@@ -14,6 +14,7 @@ import (
 
 	"github.com/bytedance/gopkg/util/gopool"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 const UserNameMaxLength = 20
@@ -388,7 +389,9 @@ func (user *User) TransferAffQuotaToQuota(quota int) error {
 	defer tx.Rollback() // 确保在函数退出时事务能回滚
 
 	// 加锁查询用户以确保数据一致性
-	err := tx.Set("gorm:query_option", "FOR UPDATE").First(&user, user.Id).Error
+	// 注意：GORM v2 已不再支持 Set("gorm:query_option", "FOR UPDATE")，
+	// 必须用 Clauses(clause.Locking{...}) 才能真正加行锁，否则并发划转有竞态。
+	err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&user, user.Id).Error
 	if err != nil {
 		return err
 	}
@@ -408,7 +411,16 @@ func (user *User) TransferAffQuotaToQuota(quota int) error {
 	}
 
 	// 提交事务
-	return tx.Commit().Error
+	if err := tx.Commit().Error; err != nil {
+		return err
+	}
+
+	// 划转改了 quota，必须让 Redis 用户缓存失效，否则中转计费仍按旧余额读缓存，
+	// 这笔划转进来的邀请返利会"看得到但用不出来"。失败仅记录日志，不影响已提交的划转。
+	if err := invalidateUserCache(user.Id); err != nil {
+		common.SysLog("aff transfer: invalidate user cache failed: " + err.Error())
+	}
+	return nil
 }
 
 func (user *User) Insert(inviterId int) error {

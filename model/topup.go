@@ -152,6 +152,11 @@ func Recharge(referenceId string, customerId string, callerIp string) (err error
 		return errors.New("充值失败，请稍后重试")
 	}
 
+	// 充值已落库，让 Redis 用户缓存失效，否则中转计费仍读旧缓存，充进来的额度最长一个 SyncFrequency 周期内用不出来
+	if err := invalidateUserCache(topUp.UserId); err != nil {
+		common.SysLog("stripe recharge: invalidate user cache failed: " + err.Error())
+	}
+
 	RecordTopupLog(topUp.UserId, fmt.Sprintf("使用在线充值成功，充值金额: %v，支付金额：%d", logger.FormatQuota(int(quota)), topUp.Amount), callerIp, topUp.PaymentMethod, PaymentMethodStripe)
 	GiveAffRebate(topUp.UserId, int(quota)) // nycatai: 持续返佣
 
@@ -384,6 +389,11 @@ func ManualCompleteTopUp(tradeNo string, callerIp string) error {
 		return err
 	}
 
+	// 充值已落库，让 Redis 用户缓存失效，否则中转计费仍读旧缓存，补单进来的额度最长一个 SyncFrequency 周期内用不出来
+	if err := invalidateUserCache(userId); err != nil {
+		common.SysLog("manual topup: invalidate user cache failed: " + err.Error())
+	}
+
 	// 事务外记录日志，避免阻塞
 	RecordTopupLog(userId, fmt.Sprintf("管理员补单成功，充值金额: %v，支付金额：%f", logger.FormatQuota(quotaToAdd), payMoney), callerIp, paymentMethod, "admin")
 	return nil
@@ -458,6 +468,11 @@ func RechargeCreem(referenceId string, customerEmail string, customerName string
 		return errors.New("充值失败，请稍后重试")
 	}
 
+	// 充值已落库，让 Redis 用户缓存失效，否则中转计费仍读旧缓存，充进来的额度最长一个 SyncFrequency 周期内用不出来
+	if err := invalidateUserCache(topUp.UserId); err != nil {
+		common.SysLog("creem recharge: invalidate user cache failed: " + err.Error())
+	}
+
 	RecordTopupLog(topUp.UserId, fmt.Sprintf("使用Creem充值成功，充值额度: %v，支付金额：%.2f", quota, topUp.Money), callerIp, topUp.PaymentMethod, PaymentMethodCreem)
 
 	return nil
@@ -520,6 +535,10 @@ func RechargeWaffo(tradeNo string, callerIp string) (err error) {
 	}
 
 	if quotaToAdd > 0 {
+		// 充值已落库，让 Redis 用户缓存失效，否则中转计费仍读旧缓存，充进来的额度最长一个 SyncFrequency 周期内用不出来
+		if err := invalidateUserCache(topUp.UserId); err != nil {
+			common.SysLog("waffo recharge: invalidate user cache failed: " + err.Error())
+		}
 		RecordTopupLog(topUp.UserId, fmt.Sprintf("Waffo充值成功，充值额度: %v，支付金额: %.2f", logger.FormatQuota(quotaToAdd), topUp.Money), callerIp, topUp.PaymentMethod, PaymentMethodWaffo)
 	}
 
@@ -581,6 +600,10 @@ func RechargeWaffoPancake(tradeNo string) (err error) {
 	}
 
 	if quotaToAdd > 0 {
+		// 充值已落库，让 Redis 用户缓存失效，否则中转计费仍读旧缓存，充进来的额度最长一个 SyncFrequency 周期内用不出来
+		if err := invalidateUserCache(topUp.UserId); err != nil {
+			common.SysLog("waffo pancake recharge: invalidate user cache failed: " + err.Error())
+		}
 		RecordLog(topUp.UserId, LogTypeTopup, fmt.Sprintf("Waffo Pancake充值成功，充值额度: %v，支付金额: %.2f", logger.FormatQuota(quotaToAdd), topUp.Money))
 	}
 

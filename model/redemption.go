@@ -151,6 +151,10 @@ func Redeem(key string, userId int) (quota int, err error) {
 		common.SysError("redemption failed: " + err.Error())
 		return 0, ErrRedeemFailed
 	}
+	// 充值已落库，让 Redis 用户缓存失效，否则中转计费仍读旧缓存，充进来的额度最长一个 SyncFrequency 周期内用不出来
+	if err := invalidateUserCache(userId); err != nil {
+		common.SysLog("redemption: invalidate user cache failed: " + err.Error())
+	}
 	RecordLog(userId, LogTypeTopup, fmt.Sprintf("通过兑换码充值 %s，兑换码ID %d", logger.LogQuota(redemption.Quota), redemption.Id))
 	GiveAffRebate(userId, redemption.Quota) // nycatai: 持续返佣
 	return redemption.Quota, nil
