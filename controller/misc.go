@@ -312,7 +312,7 @@ func SendPasswordResetEmail(c *gin.Context) {
 	if model.IsEmailAlreadyTaken(email) {
 		code := common.GenerateVerificationCode(0)
 		common.RegisterVerificationCodeWithKey(email, code, common.PasswordResetPurpose)
-		link := fmt.Sprintf("%s/user/reset?email=%s&token=%s", system_setting.ServerAddress, email, code)
+		link := fmt.Sprintf("%s/auth/reset?email=%s&token=%s", system_setting.ServerAddress, email, code)
 		subject := fmt.Sprintf("%s密码重置", common.SystemName)
 		content := fmt.Sprintf("<p>您好，你正在进行%s密码重置。</p>"+
 			"<p>点击 <a href='%s'>此处</a> 进行密码重置。</p>"+
@@ -330,17 +330,25 @@ func SendPasswordResetEmail(c *gin.Context) {
 }
 
 type PasswordResetRequest struct {
-	Email string `json:"email"`
-	Token string `json:"token"`
+	Email    string `json:"email"`
+	Token    string `json:"token"`
+	Password string `json:"password"`
 }
 
 func ResetPassword(c *gin.Context) {
 	var req PasswordResetRequest
 	err := json.NewDecoder(c.Request.Body).Decode(&req)
-	if req.Email == "" || req.Token == "" {
+	if req.Email == "" || req.Token == "" || req.Password == "" {
 		c.JSON(http.StatusOK, gin.H{
 			"success": false,
 			"message": "无效的参数",
+		})
+		return
+	}
+	if len(req.Password) < 8 || len(req.Password) > 20 {
+		c.JSON(http.StatusOK, gin.H{
+			"success": false,
+			"message": "密码长度必须在 8-20 个字符之间",
 		})
 		return
 	}
@@ -351,8 +359,7 @@ func ResetPassword(c *gin.Context) {
 		})
 		return
 	}
-	password := common.GenerateVerificationCode(12)
-	err = model.ResetUserPasswordByEmail(req.Email, password)
+	err = model.ResetUserPasswordByEmail(req.Email, req.Password)
 	if err != nil {
 		common.ApiError(c, err)
 		return
@@ -361,7 +368,6 @@ func ResetPassword(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"message": "",
-		"data":    password,
 	})
 	return
 }
