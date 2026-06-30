@@ -122,7 +122,7 @@ if (isMobileScreen) {
 export function showError(error) {
   console.error(error);
   if (error.message) {
-    if (error.name === 'AxiosError') {
+    if (error.name === 'AxiosError' && error.response) {
       switch (error.response.status) {
         case 401:
           // 清除用户状态
