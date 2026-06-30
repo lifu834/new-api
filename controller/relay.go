@@ -347,8 +347,22 @@ func shouldRetry(c *gin.Context, openaiErr *types.NewAPIError, retryTimes int) b
 	return operation_setting.ShouldRetryByStatusCode(code)
 }
 
+// isAffinityChannelFailure reports whether an error should count against a
+// channel's affinity health (channel-side faults only: 5xx, upstream timeout,
+// or transport/network errors). Client errors (4xx) are excluded.
+func isAffinityChannelFailure(err *types.NewAPIError) bool {
+	if err == nil {
+		return false
+	}
+	code := err.StatusCode
+	return code <= 0 || code == http.StatusRequestTimeout || (code >= 500 && code <= 599)
+}
+
 func processChannelError(c *gin.Context, channelError types.ChannelError, err *types.NewAPIError) {
 	logger.LogError(c, fmt.Sprintf("channel error (channel #%d, status code: %d): %s", channelError.ChannelId, err.StatusCode, err.Error()))
+	if isAffinityChannelFailure(err) {
+		service.RecordChannelFailure(channelError.ChannelId)
+	}
 	// 不要使用context获取渠道信息，异步处理时可能会出现渠道信息不一致的情况
 	// do not use context to get channel info, there may be inconsistent channel info when processing asynchronously
 	if service.ShouldDisableChannel(err) && channelError.AutoBan {

@@ -107,6 +107,14 @@ func Distribute() func(c *gin.Context) {
 								abortWithOpenAiMessage(c, http.StatusForbidden, i18n.T(c, i18n.MsgDistributorAffinityChannelDisabled))
 								return
 							}
+						} else if service.IsChannelAffinityUnhealthy(preferred.Id) {
+							// Channel is enabled but has been failing recently (e.g. upstream
+							// 502s). Skip the affinity pin and fall through to normal weighted
+							// selection so the request lands on a healthy channel instead of
+							// being trapped on this one. No abort: the cooldown is temporary and
+							// failover is exactly what we want here. The binding self-heals — on
+							// the next successful request RecordChannelAffinity rebinds this cache
+							// key to whichever channel actually succeeded.
 						} else if usingGroup == "auto" {
 							userGroup := common.GetContextKeyString(c, constant.ContextKeyUserGroup)
 							autoGroups := service.GetUserAutoGroup(userGroup)
@@ -160,6 +168,7 @@ func Distribute() func(c *gin.Context) {
 		c.Next()
 		if channel != nil && c.Writer != nil && c.Writer.Status() < http.StatusBadRequest {
 			service.RecordChannelAffinity(c, channel.Id)
+			service.RecordChannelSuccess(channel.Id)
 		}
 	}
 }
