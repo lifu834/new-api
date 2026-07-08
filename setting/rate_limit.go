@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"sort"
+	"strings"
 	"sync"
 
 	"github.com/QuantumNous/new-api/common"
@@ -103,6 +105,68 @@ func GetGroupConcurrencyLimit(group string) (int, bool) {
 	}
 	v, ok := ModelConcurrencyLimitGroup[group]
 	return v, ok
+}
+
+// ===== nycatai: 限流豁免分组白名单（按用户身份档位，如 vvip；RPM + 并发全跳过）=====
+
+var ModelRateLimitExemptGroups = map[string]bool{}
+var ModelRateLimitExemptMutex sync.RWMutex
+
+// ModelRateLimitExemptGroups2JSONString 序列化为排序后的 JSON 字符串数组，如 ["vvip"]
+func ModelRateLimitExemptGroups2JSONString() string {
+	ModelRateLimitExemptMutex.RLock()
+	defer ModelRateLimitExemptMutex.RUnlock()
+
+	groups := make([]string, 0, len(ModelRateLimitExemptGroups))
+	for g := range ModelRateLimitExemptGroups {
+		groups = append(groups, g)
+	}
+	sort.Strings(groups)
+	jsonBytes, err := common.Marshal(groups)
+	if err != nil {
+		common.SysLog("error marshalling rate limit exempt groups: " + err.Error())
+	}
+	return string(jsonBytes)
+}
+
+func UpdateModelRateLimitExemptGroupsByJSONString(jsonStr string) error {
+	var groups []string
+	if err := common.Unmarshal([]byte(jsonStr), &groups); err != nil {
+		return err
+	}
+	m := make(map[string]bool, len(groups))
+	for _, g := range groups {
+		g = strings.TrimSpace(g)
+		if g != "" {
+			m[g] = true
+		}
+	}
+	ModelRateLimitExemptMutex.Lock()
+	defer ModelRateLimitExemptMutex.Unlock()
+	ModelRateLimitExemptGroups = m
+	return nil
+}
+
+func IsModelRateLimitExemptGroup(group string) bool {
+	if group == "" {
+		return false
+	}
+	ModelRateLimitExemptMutex.RLock()
+	defer ModelRateLimitExemptMutex.RUnlock()
+	return ModelRateLimitExemptGroups[group]
+}
+
+func CheckModelRateLimitExemptGroups(jsonStr string) error {
+	var groups []string
+	if err := common.Unmarshal([]byte(jsonStr), &groups); err != nil {
+		return fmt.Errorf(`豁免分组须为 JSON 字符串数组，如 ["vvip"]: %s`, err.Error())
+	}
+	for _, g := range groups {
+		if strings.TrimSpace(g) == "" {
+			return fmt.Errorf("豁免分组名不能为空")
+		}
+	}
+	return nil
 }
 
 func CheckModelConcurrencyLimitGroup(jsonStr string) error {

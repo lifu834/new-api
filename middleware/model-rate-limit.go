@@ -190,6 +190,12 @@ func ModelRequestRateLimit() func(c *gin.Context) {
 			group = common.GetContextKeyString(c, constant.ContextKeyTokenGroup)
 		}
 
+		// nycatai: 豁免分组白名单（如 vvip）整组跳过 RPM 限速
+		if setting.IsModelRateLimitExemptGroup(group) {
+			c.Next()
+			return
+		}
+
 		//获取分组的限流配置
 		groupTotalCount, groupSuccessCount, found := setting.GetGroupRateLimit(group)
 		if found {

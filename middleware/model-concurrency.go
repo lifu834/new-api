@@ -40,6 +40,11 @@ func ModelConcurrencyLimit() func(c *gin.Context) {
 		if group == "" {
 			group = common.GetContextKeyString(c, constant.ContextKeyTokenGroup)
 		}
+		// nycatai: 豁免分组白名单（如 vvip）整组跳过并发限制
+		if setting.IsModelRateLimitExemptGroup(group) {
+			c.Next()
+			return
+		}
 		maxConcurrency := setting.ModelConcurrencyLimitCount
 		if g, ok := setting.GetGroupConcurrencyLimit(group); ok {
 			maxConcurrency = g
