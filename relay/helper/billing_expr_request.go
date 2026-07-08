@@ -18,6 +18,9 @@ func ResolveIncomingBillingExprRequestInput(c *gin.Context, info *relaycommon.Re
 			merged[k] = v
 		}
 		input.Headers = merged
+		if info != nil {
+			merged["x-user-group"] = info.UserGroup
+		}
 		return input, nil
 	}
 
@@ -31,6 +34,12 @@ func ResolveIncomingBillingExprRequestInput(c *gin.Context, info *relaycommon.Re
 		return billingexpr.RequestInput{}, err
 	}
 	input.Body = bodyBytes
+	if info != nil {
+		if input.Headers == nil {
+			input.Headers = map[string]string{}
+		}
+		input.Headers["x-user-group"] = info.UserGroup
+	}
 	return input, nil
 }
 
