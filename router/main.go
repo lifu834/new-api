@@ -14,6 +14,10 @@ import (
 )
 
 func SetRouter(router *gin.Engine, buildFS embed.FS, indexPage []byte) {
+	// 全局 CORS：/api 面板路由此前未挂 CORS（仅 relay/dashboard/usage/log 局部挂），
+	// 前端迁 CF Pages 后跨源调用 /api/* 的实际响应必须带 Access-Control-Allow-Origin。
+	// 必须在所有子路由注册之前 Use，否则先注册的路由拿不到该中间件。
+	router.Use(middleware.CORS())
 	SetApiRouter(router)
 	SetDashboardRouter(router)
 	SetRelayRouter(router)
