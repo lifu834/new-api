@@ -60,8 +60,12 @@ func formatUserLogs(logs []*Log, startIdx int) {
 			delete(otherMap, "admin_info")
 			// delete(otherMap, "reject_reason")
 			delete(otherMap, "stream_status")
+			logs[i].Other = common.MapToJsonStr(otherMap)
+		} else {
+			// 空/无效 other 不可走 MapToJsonStr(nil)：json.Marshal(nil map) 输出 "null"，
+			// 前端 JSON.parse("null") 得 null 会空指针（260708 使用详情页白屏事故）
+			logs[i].Other = ""
 		}
-		logs[i].Other = common.MapToJsonStr(otherMap)
 		logs[i].Id = startIdx + i + 1
 	}
 }
