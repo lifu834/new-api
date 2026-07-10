@@ -1036,6 +1036,8 @@
     "启用请求透传": "Enable request pass-through",
     "启用违规扣费": "Enable violation deduction",
     "启用额度消费日志记录": "Enable quota consumption logging",
+    "全局记录请求 IP": "Record request IP globally",
+    "在消费/错误日志中记录客户端 IP（覆盖用户级设置）": "Record client IP in consumption/error logs (overrides per-user setting)",
     "启用验证": "Enable Authentication",
     "周": "week",
     "命中判定：usage 中存在 cached tokens（例如 cached_tokens/prompt_cache_hit_tokens）即视为命中。": "Hit determination: Presence of cached tokens in usage (e.g. cached_tokens/prompt_cache_hit_tokens) is considered a hit.",

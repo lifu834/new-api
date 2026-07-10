@@ -1022,6 +1022,8 @@
     "启用请求透传": "Bật truyền qua yêu cầu",
     "启用违规扣费": "Bật trừ phí vi phạm",
     "启用额度消费日志记录": "Bật ghi nhật ký tiêu thụ hạn ngạch",
+    "全局记录请求 IP": "Ghi IP yêu cầu toàn cục",
+    "在消费/错误日志中记录客户端 IP（覆盖用户级设置）": "Ghi IP máy khách trong nhật ký tiêu thụ/lỗi (ghi đè cài đặt của người dùng)",
     "启用验证": "Bật xác thực",
     "周": "tuần",
     "命中判定：usage 中存在 cached tokens（例如 cached_tokens/prompt_cache_hit_tokens）即视为命中。": "Xác định trúng: Sự tồn tại của cached tokens trong usage (VD: cached_tokens/prompt_cache_hit_tokens) được coi là trúng.",

@@ -74,6 +74,9 @@ var MemoryCacheEnabled bool
 
 var LogConsumeEnabled = true
 
+// RecordIpLogEnabled 全局强制在消费/错误日志中记录请求 IP（覆盖用户级 record_ip_log 设置）
+var RecordIpLogEnabled = false
+
 var TLSInsecureSkipVerify bool
 var InsecureTLSConfig = &tls.Config{InsecureSkipVerify: true}
 

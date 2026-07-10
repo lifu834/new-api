@@ -1034,6 +1034,8 @@
     "启用请求透传": "Activer la transmission de la requête",
     "启用违规扣费": "Activer la déduction de violation",
     "启用额度消费日志记录": "Activer la journalisation de la consommation de quota",
+    "全局记录请求 IP": "Enregistrer l'IP des requêtes globalement",
+    "在消费/错误日志中记录客户端 IP（覆盖用户级设置）": "Enregistrer l'IP du client dans les journaux de consommation/erreurs (remplace le paramètre utilisateur)",
     "启用验证": "Activer l'authentification",
     "周": "semaine",
     "命中判定：usage 中存在 cached tokens（例如 cached_tokens/prompt_cache_hit_tokens）即视为命中。": "Détermination de hit : La présence de cached tokens dans usage (ex. cached_tokens/prompt_cache_hit_tokens) est considérée comme un hit.",
