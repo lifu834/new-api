@@ -439,3 +439,54 @@ func TestComposeTieredTextQuotaErrorFallbackUsesPreConsumedQuota(t *testing.T) {
 	require.Equal(t, int64(12500), summary.ToolCallSurchargeQuota.Round(0).IntPart())
 	require.Equal(t, 14500, quota)
 }
+
+func TestCalculateTextQuotaSummaryBillsOpenAICacheWriteTokensAsSubset(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	w := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(w)
+
+	relayInfo := &relaycommon.RelayInfo{
+		RelayFormat:             types.RelayFormatOpenAI,
+		FinalRequestRelayFormat: types.RelayFormatOpenAI,
+		OriginModelName:         "gpt-5.6-sol",
+		PriceData: types.PriceData{
+			ModelRatio:         1,
+			CompletionRatio:    1,
+			CacheRatio:         0.1,
+			CacheCreationRatio: 1.25,
+			GroupRatioInfo: types.GroupRatioInfo{
+				GroupRatio: 1,
+			},
+		},
+		StartTime: time.Now(),
+	}
+
+	// OpenAI GPT-5.6 语义: prompt_tokens 为总输入,cached_tokens(读)与
+	// cache_write_tokens(写)均为其子集,须拆成互斥桶计费,不可叠加或重复计费
+	usage := &dto.Usage{
+		PromptTokens:     1000,
+		CompletionTokens: 0,
+		PromptTokensDetails: dto.InputTokenDetails{
+			CachedTokens:     600,
+			CacheWriteTokens: 300,
+		},
+	}
+
+	summary := calculateTextQuotaSummary(ctx, relayInfo, usage)
+
+	require.Equal(t, 300, summary.CacheCreationTokens)
+	require.False(t, summary.IsClaudeUsageSemantic)
+	// base(1000-600-300)=100 + 600*0.1 + 300*1.25 = 535
+	require.Equal(t, 535, summary.Quota)
+}
+
+func TestInputTokenDetailsCacheCreationTokensFallbackOrder(t *testing.T) {
+	var nilDetails *dto.InputTokenDetails
+	require.Equal(t, 0, nilDetails.GetCacheCreationTokens())
+
+	both := &dto.InputTokenDetails{CachedCreationTokens: 5, CacheWriteTokens: 9}
+	require.Equal(t, 5, both.GetCacheCreationTokens())
+
+	writeOnly := &dto.InputTokenDetails{CacheWriteTokens: 9}
+	require.Equal(t, 9, writeOnly.GetCacheCreationTokens())
+}

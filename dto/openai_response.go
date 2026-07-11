@@ -255,9 +255,26 @@ type OpenAIVideoResponse struct {
 type InputTokenDetails struct {
 	CachedTokens         int `json:"cached_tokens"`
 	CachedCreationTokens int `json:"cached_creation_tokens,omitempty"`
-	TextTokens           int `json:"text_tokens"`
-	AudioTokens          int `json:"audio_tokens"`
-	ImageTokens          int `json:"image_tokens"`
+	// CacheWriteTokens 对应 OpenAI GPT-5.6+ 的缓存写入用量
+	// (chat: prompt_tokens_details.cache_write_tokens / responses: input_tokens_details.cache_write_tokens)。
+	// 语义为 prompt_tokens/input_tokens 的子集(与 Claude 的 cache_creation 额外附加不同),
+	// 单一 TTL,官方按 1.25x 输入价计费,计费侧走 CacheCreationRatio 通道。
+	CacheWriteTokens int `json:"cache_write_tokens,omitempty"`
+	TextTokens       int `json:"text_tokens"`
+	AudioTokens      int `json:"audio_tokens"`
+	ImageTokens      int `json:"image_tokens"`
+}
+
+// GetCacheCreationTokens 返回缓存创建/写入 token 数,cached_creation_tokens 优先,
+// 其次 OpenAI GPT-5.6+ 的 cache_write_tokens。
+func (d *InputTokenDetails) GetCacheCreationTokens() int {
+	if d == nil {
+		return 0
+	}
+	if d.CachedCreationTokens > 0 {
+		return d.CachedCreationTokens
+	}
+	return d.CacheWriteTokens
 }
 
 type OutputTokenDetails struct {
