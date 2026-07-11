@@ -595,7 +595,10 @@ func RelayTask(c *gin.Context) {
 			ModelRatio:      relayInfo.PriceData.ModelRatio,
 			OtherRatios:     relayInfo.PriceData.OtherRatios,
 			OriginModelName: relayInfo.OriginModelName,
-			PerCallBilling:  common.StringsContains(constant.TaskPricePatches, relayInfo.OriginModelName) || relayInfo.PriceData.UsePrice,
+			// 分档表达式计费的任务（如 gpt-image-2）：其价格在提交时已由请求参数
+			// （size + user-group）确定为最终额度，与 token 数无关，故按「按次」处理，
+			// 使完成轮询阶段跳过按 token 重算（settleTaskBillingOnComplete），保证 预扣 == 结算。
+			PerCallBilling:  common.StringsContains(constant.TaskPricePatches, relayInfo.OriginModelName) || relayInfo.PriceData.UsePrice || relayInfo.TieredBillingSnapshot != nil,
 		}
 		task.Quota = result.Quota
 		task.Data = result.TaskData

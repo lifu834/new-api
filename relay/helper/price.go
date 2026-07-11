@@ -167,6 +167,22 @@ func ModelPriceHelper(c *gin.Context, info *relaycommon.RelayInfo, promptTokens 
 func ModelPriceHelperPerCall(c *gin.Context, info *relaycommon.RelayInfo) (types.PriceData, error) {
 	groupRatioInfo := HandleGroupRatio(c, info)
 
+	// 分档表达式计费（tiered_expr，如 gpt-image-2）：与同步 /v1/images/generations
+	// 走同一套表达式（按 param("size") + x-user-group 分档），保证异步任务与同步计费一致。
+	// 按次计费无 token 用量：promptTokens 传 0、meta 传空——生图表达式只用 param()/header()，
+	// 不引用 p/c，token 参数无关紧要（RunExprWithRequest 容忍 P=C=0）。
+	if billing_setting.GetBillingMode(info.OriginModelName) == billing_setting.BillingModeTieredExpr {
+		priceData, err := modelPriceHelperTiered(c, info, 0, &types.TokenCountMeta{}, groupRatioInfo)
+		if err != nil {
+			return types.PriceData{}, err
+		}
+		// 分档助手把金额记在 QuotaToPreConsume 上；而按次任务路径（RelayTaskSubmit）
+		// 从 PriceData.Quota 读取预扣与结算额度。这里桥接二者，使 预扣 == 结算。
+		priceData.Quota = priceData.QuotaToPreConsume
+		info.PriceData = priceData
+		return priceData, nil
+	}
+
 	modelPrice, success := ratio_setting.GetModelPrice(info.OriginModelName, true)
 	usePrice := success
 	var modelRatio float64

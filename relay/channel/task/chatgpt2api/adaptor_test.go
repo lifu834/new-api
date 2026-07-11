@@ -176,6 +176,30 @@ func TestDetectImageMimeType(t *testing.T) {
 	}
 }
 
+// TestInjectBillingSizeForEdits proves the multipart edits "size" is surfaced to
+// the tiered billing expression via a synthesized JSON billing body, so
+// param("size") can price an edits request by its real size.
+func TestInjectBillingSizeForEdits(t *testing.T) {
+	cases := map[string]string{
+		"2048x2048": `{"size":"2048x2048"}`,
+		"1024x1024": `{"size":"1024x1024"}`,
+		"":          `{"size":""}`, // missing size → empty-size branch
+	}
+	for size, want := range cases {
+		a := &TaskAdaptor{}
+		c := newTestCtx(http.MethodPost, "/v1/images/async/edits")
+		c.Set("task_request", relaycommon.TaskSubmitReq{Prompt: "p", Size: size})
+		info := &relaycommon.RelayInfo{}
+		a.injectBillingSizeForEdits(c, info)
+		if info.BillingRequestInput == nil {
+			t.Fatalf("size %q: BillingRequestInput not set", size)
+		}
+		if got := string(info.BillingRequestInput.Body); got != want {
+			t.Errorf("size %q: body = %s, want %s", size, got, want)
+		}
+	}
+}
+
 // TestCollectImageFiles covers the image / image[] / image[i] resolution order.
 func TestCollectImageFiles(t *testing.T) {
 	mk := func(keys ...string) *multipart.Form {

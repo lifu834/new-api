@@ -15,6 +15,7 @@ import (
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/pkg/billingexpr"
 	"github.com/QuantumNous/new-api/relay/channel"
 	taskcommon "github.com/QuantumNous/new-api/relay/channel/task/taskcommon"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
@@ -119,7 +120,17 @@ func isEditsRequest(c *gin.Context) bool {
 func (a *TaskAdaptor) ValidateRequestAndSetAction(c *gin.Context, info *relaycommon.RelayInfo) (taskErr *dto.TaskError) {
 	a.isEdits = isEditsRequest(c)
 	if a.isEdits {
-		return a.validateEditsRequest(c)
+		if taskErr := a.validateEditsRequest(c); taskErr != nil {
+			return taskErr
+		}
+		// gpt-image-2 uses tiered_expr billing keyed off param("size"), but the
+		// billing request-input reader (readIncomingBillingExprBody) only parses
+		// JSON bodies — a multipart edits body is invisible to it. Surface the
+		// parsed size to the expression via a synthesized JSON billing body so an
+		// edits request is priced by its real size (generations already expose
+		// size through the real JSON body and are left untouched).
+		a.injectBillingSizeForEdits(c, info)
+		return nil
 	}
 	var req relaycommon.TaskSubmitReq
 	if err := common.UnmarshalBodyReusable(c, &req); err != nil {
@@ -164,6 +175,28 @@ func (a *TaskAdaptor) validateEditsRequest(c *gin.Context) *dto.TaskError {
 	return nil
 }
 
+// injectBillingSizeForEdits makes the multipart edits "size" discoverable to the
+// tiered billing expression's param("size"). It stores a minimal synthesized
+// JSON billing body ({"size":"<size>"}) on info.BillingRequestInput, which
+// ResolveIncomingBillingExprRequestInput consumes in preference to reading the
+// (multipart, hence unreadable) request body. Only the size is needed — the
+// gpt-image-2 expression references no other request param. A missing size
+// yields {"size":""}, matching the expression's empty-size branch.
+func (a *TaskAdaptor) injectBillingSizeForEdits(c *gin.Context, info *relaycommon.RelayInfo) {
+	if info == nil {
+		return
+	}
+	size := ""
+	if req, err := relaycommon.GetTaskRequest(c); err == nil {
+		size = req.Size
+	}
+	body, err := common.Marshal(map[string]string{"size": size})
+	if err != nil {
+		return
+	}
+	info.BillingRequestInput = &billingexpr.RequestInput{Body: body}
+}
+
 // collectImageFiles returns the input-image file headers from a parsed edits
 // form, checking (in order) the standard "image" field, the "image[]" array
 // field, and any "image[...]"-prefixed field (multi-image edits). Client field
@@ -193,28 +226,11 @@ func hasImageFilePart(form *multipart.Form) bool {
 
 // EstimateBilling returns OtherRatios for pre-charge based on the user request.
 //
-// FIRST CUT: return nil so the task is billed at the flat base model price.
-//
-// TODO(pricing): to align with the sync-side tiered image pricing, extract size /
-// quality from the parsed request and return them as OtherRatios multipliers, e.g.:
-//
-//	req, err := relaycommon.GetTaskRequest(c)
-//	if err != nil {
-//	    return nil
-//	}
-//	ratios := map[string]float64{"size": 1, "quality": 1}
-//	switch req.Size {                 // mirror sora's size logic
-//	case "1024x1536", "1536x1024":
-//	    ratios["size"] = 1.5
-//	case "2048x2048":
-//	    ratios["size"] = 2
-//	}
-//	// quality (standard|hd|high|...) multipliers would be applied here too.
-//	return ratios
-//
-// The multipliers are then folded into the pre-charge quota by RelayTaskSubmit and
-// (optionally) re-settled on completion. Keep them consistent with the numbers used
-// by the synchronous /v1/images/generations path.
+// gpt-image-2 is priced via the tiered-expression billing system (billing_mode
+// tiered_expr), which keys off param("size") and the x-user-group header — not
+// off OtherRatio multipliers. That evaluation happens inside
+// ModelPriceHelperPerCall (which delegates to modelPriceHelperTiered for
+// tiered_expr models), so there are no extra ratios to fold in here.
 func (a *TaskAdaptor) EstimateBilling(c *gin.Context, info *relaycommon.RelayInfo) map[string]float64 {
 	return nil
 }
