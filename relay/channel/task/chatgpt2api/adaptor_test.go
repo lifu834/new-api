@@ -1,9 +1,15 @@
 package chatgpt2api
 
 import (
+	"mime/multipart"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 
+	relaycommon "github.com/QuantumNous/new-api/relay/common"
+
 	"github.com/QuantumNous/new-api/model"
+	"github.com/gin-gonic/gin"
 )
 
 // TestParseTaskResult_StatusMapping covers the upstream→internal status mapping,
@@ -92,3 +98,106 @@ func TestParseTaskResult_MalformedBody(t *testing.T) {
 
 // (extractImageRevisedPrompt / mapTaskStatusToSimple live in package relay and are
 // covered by relay/relay_task_chatgpt2api_test.go.)
+
+func newTestCtx(method, path string) *gin.Context {
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(method, path, nil)
+	return c
+}
+
+// TestIsEditsRequest covers both the explicit context flag (set by the
+// distributor) and the path-suffix fallback.
+func TestIsEditsRequest(t *testing.T) {
+	// flag set by distributor
+	c := newTestCtx(http.MethodPost, "/v1/images/async/edits")
+	c.Set("image_async_op", "edits")
+	if !isEditsRequest(c) {
+		t.Errorf("expected edits=true when image_async_op flag set")
+	}
+
+	// path-suffix fallback (flag absent)
+	c = newTestCtx(http.MethodPost, "/v1/images/async/edits")
+	if !isEditsRequest(c) {
+		t.Errorf("expected edits=true from /edits path suffix")
+	}
+
+	// generations must NOT be edits
+	c = newTestCtx(http.MethodPost, "/v1/images/async/generations")
+	if isEditsRequest(c) {
+		t.Errorf("expected edits=false for generations path")
+	}
+
+	// nil-safe
+	if isEditsRequest(nil) {
+		t.Errorf("expected edits=false for nil context")
+	}
+}
+
+// TestBuildRequestURL_EditsVsGenerations proves the URL forks on a.isEdits.
+func TestBuildRequestURL_EditsVsGenerations(t *testing.T) {
+	info := &relaycommon.RelayInfo{ChannelMeta: &relaycommon.ChannelMeta{ChannelBaseUrl: "https://up.example"}}
+
+	gen := &TaskAdaptor{}
+	gen.Init(info)
+	gotGen, err := gen.BuildRequestURL(info)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if want := "https://up.example/api/image-tasks/generations"; gotGen != want {
+		t.Errorf("generations url = %q, want %q", gotGen, want)
+	}
+
+	edit := &TaskAdaptor{isEdits: true}
+	edit.Init(info) // Init does not reset isEdits
+	gotEdit, err := edit.BuildRequestURL(info)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if want := "https://up.example/api/image-tasks/edits"; gotEdit != want {
+		t.Errorf("edits url = %q, want %q", gotEdit, want)
+	}
+}
+
+// TestDetectImageMimeType covers extension→MIME mapping incl. the png fallback.
+func TestDetectImageMimeType(t *testing.T) {
+	cases := map[string]string{
+		"a.png":     "image/png",
+		"a.PNG":     "image/png",
+		"a.jpg":     "image/jpeg",
+		"a.jpeg":    "image/jpeg",
+		"a.webp":    "image/webp",
+		"noext":     "image/png",
+		"a.unknown": "image/png",
+	}
+	for name, want := range cases {
+		if got := detectImageMimeType(name); got != want {
+			t.Errorf("detectImageMimeType(%q) = %q, want %q", name, got, want)
+		}
+	}
+}
+
+// TestCollectImageFiles covers the image / image[] / image[i] resolution order.
+func TestCollectImageFiles(t *testing.T) {
+	mk := func(keys ...string) *multipart.Form {
+		f := &multipart.Form{File: map[string][]*multipart.FileHeader{}}
+		for _, k := range keys {
+			f.File[k] = []*multipart.FileHeader{{Filename: k + ".png"}}
+		}
+		return f
+	}
+	if got := collectImageFiles(mk("image")); len(got) != 1 {
+		t.Errorf(`"image" field: got %d files, want 1`, len(got))
+	}
+	if got := collectImageFiles(mk("image[]")); len(got) != 1 {
+		t.Errorf(`"image[]" field: got %d files, want 1`, len(got))
+	}
+	if got := collectImageFiles(mk("image[0]", "image[1]")); len(got) != 2 {
+		t.Errorf(`"image[i]" fields: got %d files, want 2`, len(got))
+	}
+	if got := collectImageFiles(mk("mask")); len(got) != 0 {
+		t.Errorf("no image field: got %d files, want 0", len(got))
+	}
+	if got := collectImageFiles(nil); got != nil {
+		t.Errorf("nil form: got %v, want nil", got)
+	}
+}

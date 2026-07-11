@@ -283,6 +283,13 @@ func getModelRequest(c *gin.Context) (*ModelRequest, bool, error) {
 			}
 			modelRequest.Model = req.Model
 			relayMode = relayconstant.RelayModeImageAsyncSubmit
+			// Async image EDITS reuse the submit relay mode (and thus the type-58
+			// routing filter); the operation is disambiguated for the adaptor via
+			// this context flag so it can target /api/image-tasks/edits and rebuild
+			// the multipart body carrying the input image.
+			if strings.HasSuffix(c.Request.URL.Path, "/edits") {
+				c.Set("image_async_op", "edits")
+			}
 		} else if c.Request.Method == http.MethodGet {
 			relayMode = relayconstant.RelayModeImageAsyncFetchByID
 			shouldSelectChannel = false

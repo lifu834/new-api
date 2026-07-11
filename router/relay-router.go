@@ -196,6 +196,7 @@ func SetRelayRouter(router *gin.Engine) {
 	relayImageAsyncRouter.Use(middleware.TokenAuth(), middleware.Distribute())
 	{
 		relayImageAsyncRouter.POST("/generations", controller.RelayTask)
+		relayImageAsyncRouter.POST("/edits", controller.RelayTask)
 		relayImageAsyncRouter.GET("/result/:task_id", controller.RelayTaskFetch)
 	}
 
