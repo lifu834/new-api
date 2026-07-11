@@ -87,10 +87,15 @@ func sweepTimedOutTasks(ctx context.Context) {
 	}
 }
 
-// TaskPollingLoop 主轮询循环，每 15 秒检查一次未完成的任务
+// TaskPollingLoop 主轮询循环，默认每 15 秒检查一次未完成的任务。
+// 间隔可由 TASK_POLL_INTERVAL_SECONDS 配置（webhook 回调为主时可调大以降压）。
 func TaskPollingLoop() {
 	for {
-		time.Sleep(time.Duration(15) * time.Second)
+		interval := constant.TaskPollIntervalSeconds
+		if interval <= 0 {
+			interval = 15
+		}
+		time.Sleep(time.Duration(interval) * time.Second)
 		common.SysLog("任务进度轮询开始")
 		ctx := context.TODO()
 		sweepTimedOutTasks(ctx)

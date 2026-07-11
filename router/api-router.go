@@ -12,6 +12,14 @@ import (
 )
 
 func SetApiRouter(router *gin.Engine) {
+	// Async task completion PUSH from upstream (e.g. chatgpt2api). No user/token
+	// auth — authenticated solely by the shared secret in the path (fail closed).
+	// Registered on the root engine, NOT under apiRouter, to bypass the per-IP
+	// GlobalAPIRateLimit: all callbacks share one source IP (the upstream), so a
+	// per-IP limit (180/180s) would throttle them under high concurrency. Source
+	// is instead locked to the upstream tailnet IP at the nginx layer.
+	router.POST("/api/task-callback/:secret", controller.TaskCallback)
+
 	apiRouter := router.Group("/api")
 	apiRouter.Use(middleware.RouteTag("api"))
 	apiRouter.Use(gzip.Gzip(gzip.DefaultCompression))
@@ -49,6 +57,7 @@ func SetApiRouter(router *gin.Engine) {
 		apiRouter.POST("/stripe/webhook", controller.StripeWebhook)
 		apiRouter.POST("/creem/webhook", controller.CreemWebhook)
 		apiRouter.POST("/waffo/webhook", controller.WaffoWebhook)
+
 		//apiRouter.POST("/waffo-pancake/webhook", controller.WaffoPancakeWebhook)
 
 		// Universal secure verification routes

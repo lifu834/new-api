@@ -5,9 +5,11 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/relay/channel"
@@ -165,6 +167,14 @@ func (a *TaskAdaptor) BuildRequestBody(c *gin.Context, info *relaycommon.RelayIn
 	// upstream id == public id (chatgpt2api is idempotent on client_task_id)
 	bodyMap["client_task_id"] = info.PublicTaskID
 	bodyMap["model"] = info.UpstreamModelName
+
+	// Push (webhook) completion: tell chatgpt2api where to POST the terminal task
+	// snapshot. The secret rides in the URL path and is verified constant-time by
+	// the receiver (POST /api/task-callback/:secret). If no base URL is configured
+	// we omit callback_url entirely — pure polling still works (backward compatible).
+	if base := constant.TaskCallbackBaseURL; base != "" {
+		bodyMap["callback_url"] = fmt.Sprintf("%s/api/task-callback/%s", base, url.PathEscape(constant.TaskCallbackSecret))
+	}
 
 	// drop fields the async generations API does not accept
 	delete(bodyMap, "n")

@@ -174,6 +174,11 @@ func initConstantEnv() {
 	constant.TaskQueryLimit = GetEnvOrDefault("TASK_QUERY_LIMIT", 1000)
 	// 异步任务超时时间（分钟），超过此时间未完成的任务将被标记为失败并退款。0 表示禁用。
 	constant.TaskTimeoutMinutes = GetEnvOrDefault("TASK_TIMEOUT_MINUTES", 1440)
+	// 异步任务轮询间隔（秒），作为 webhook 回调的兜底；默认 15（与历史行为一致）。
+	constant.TaskPollIntervalSeconds = GetEnvOrDefault("TASK_POLL_INTERVAL_SECONDS", 15)
+	// webhook 回调配置：基址为空时不下发 callback_url（保持纯轮询兼容）。
+	constant.TaskCallbackBaseURL = strings.TrimRight(GetEnvOrDefaultString("TASK_CALLBACK_BASE_URL", ""), "/")
+	constant.TaskCallbackSecret = GetEnvOrDefaultString("TASK_CALLBACK_SECRET", "")
 
 	soraPatchStr := GetEnvOrDefaultString("TASK_PRICE_PATCH", "")
 	if soraPatchStr != "" {
