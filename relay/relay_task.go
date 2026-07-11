@@ -279,9 +279,10 @@ func recalcQuotaFromRatios(info *relaycommon.RelayInfo, ratios map[string]float6
 }
 
 var fetchRespBuilders = map[int]func(c *gin.Context) (respBody []byte, taskResp *dto.TaskError){
-	relayconstant.RelayModeSunoFetchByID:  sunoFetchByIDRespBodyBuilder,
-	relayconstant.RelayModeSunoFetch:      sunoFetchRespBodyBuilder,
-	relayconstant.RelayModeVideoFetchByID: videoFetchByIDRespBodyBuilder,
+	relayconstant.RelayModeSunoFetchByID:       sunoFetchByIDRespBodyBuilder,
+	relayconstant.RelayModeSunoFetch:           sunoFetchRespBodyBuilder,
+	relayconstant.RelayModeVideoFetchByID:      videoFetchByIDRespBodyBuilder,
+	relayconstant.RelayModeImageAsyncFetchByID: imageAsyncFetchByIDRespBodyBuilder,
 }
 
 func RelayTaskFetch(c *gin.Context, relayMode int) (taskResp *dto.TaskError) {
@@ -413,6 +414,77 @@ func videoFetchByIDRespBodyBuilder(c *gin.Context) (respBody []byte, taskResp *d
 		taskResp = service.TaskErrorWrapper(err, "marshal_response_failed", http.StatusInternalServerError)
 	}
 	return
+}
+
+// imageAsyncFetchByIDRespBodyBuilder 返回异步生图任务（chatgpt2api）的查询结果。
+// 响应形状：{code:"success", data:{task_id, status, data:[{url, revised_prompt}], ...}}
+// 任务状态由后台轮询循环（TaskPollingLoop → ParseTaskResult）写入 DB，这里只做读取。
+func imageAsyncFetchByIDRespBodyBuilder(c *gin.Context) (respBody []byte, taskResp *dto.TaskError) {
+	taskId := c.Param("task_id")
+	if taskId == "" {
+		taskId = c.GetString("task_id")
+	}
+	userId := c.GetInt("id")
+
+	originTask, exist, err := model.GetByTaskId(userId, taskId)
+	if err != nil {
+		taskResp = service.TaskErrorWrapper(err, "get_task_failed", http.StatusInternalServerError)
+		return
+	}
+	if !exist {
+		taskResp = service.TaskErrorWrapperLocal(errors.New("task_not_exist"), "task_not_exist", http.StatusBadRequest)
+		return
+	}
+
+	out := map[string]any{
+		"task_id": originTask.TaskID,
+		"status":  mapTaskStatusToSimple(originTask.Status),
+		"data":    []any{},
+	}
+	if url := originTask.GetResultURL(); url != "" {
+		image := map[string]any{"url": url}
+		if rp := extractImageRevisedPrompt(originTask.Data); rp != "" {
+			image["revised_prompt"] = rp
+		}
+		out["data"] = []any{image}
+	}
+	if originTask.FailReason != "" {
+		out["error"] = originTask.FailReason
+	}
+	if originTask.Progress != "" {
+		out["progress"] = originTask.Progress
+	}
+
+	respBody, err = common.Marshal(dto.TaskResponse[any]{
+		Code: "success",
+		Data: out,
+	})
+	if err != nil {
+		taskResp = service.TaskErrorWrapper(err, "marshal_response_failed", http.StatusInternalServerError)
+	}
+	return
+}
+
+// extractImageRevisedPrompt 从 chatgpt2api 轮询原始响应（存于 task.Data）中提取
+// items[0].data[0].revised_prompt（若存在）。
+func extractImageRevisedPrompt(data []byte) string {
+	if len(data) == 0 {
+		return ""
+	}
+	var parsed struct {
+		Items []struct {
+			Data []struct {
+				RevisedPrompt string `json:"revised_prompt"`
+			} `json:"data"`
+		} `json:"items"`
+	}
+	if err := common.Unmarshal(data, &parsed); err != nil {
+		return ""
+	}
+	if len(parsed.Items) > 0 && len(parsed.Items[0].Data) > 0 {
+		return parsed.Items[0].Data[0].RevisedPrompt
+	}
+	return ""
 }
 
 // tryRealtimeFetch 尝试从上游实时拉取 Gemini/Vertex 任务状态。

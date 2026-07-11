@@ -187,6 +187,18 @@ func SetRelayRouter(router *gin.Engine) {
 		relaySunoRouter.GET("/fetch/:id", controller.RelayTaskFetch)
 	}
 
+	// Async image-generation task channel (chatgpt2api): submit → task_id → poll → url.
+	// Plugs into the generic task framework (RelayTask / RelayTaskFetch), so polling,
+	// billing, timeout and refund are handled automatically.
+	relayImageAsyncRouter := router.Group("/v1/images/async")
+	relayImageAsyncRouter.Use(middleware.RouteTag("relay"))
+	relayImageAsyncRouter.Use(middleware.SystemPerformanceCheck())
+	relayImageAsyncRouter.Use(middleware.TokenAuth(), middleware.Distribute())
+	{
+		relayImageAsyncRouter.POST("/generations", controller.RelayTask)
+		relayImageAsyncRouter.GET("/result/:task_id", controller.RelayTaskFetch)
+	}
+
 	relayGeminiRouter := router.Group("/v1beta")
 	relayGeminiRouter.Use(middleware.RouteTag("relay"))
 	relayGeminiRouter.Use(middleware.SystemPerformanceCheck())

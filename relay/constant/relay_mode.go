@@ -52,6 +52,10 @@ const (
 	RelayModeGemini
 
 	RelayModeResponsesCompact
+
+	// Async image-generation task (chatgpt2api) — submit + fetch-by-id.
+	RelayModeImageAsyncSubmit
+	RelayModeImageAsyncFetchByID
 )
 
 func Path2RelayMode(path string) int {
