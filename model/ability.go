@@ -103,7 +103,10 @@ func getChannelQuery(group string, model string, retry int) (*gorm.DB, error) {
 	return channelQuery, nil
 }
 
-func GetChannel(group string, model string, retry int) (*Channel, error) {
+// GetChannel is the non-memory-cache counterpart of GetRandomSatisfiedChannel.
+// The optional filter restricts candidates by channel type; when absent the
+// original behavior is preserved exactly.
+func GetChannel(group string, model string, retry int, filters ...func(channelType int) bool) (*Channel, error) {
 	var abilities []Ability
 
 	var err error = nil
@@ -118,6 +121,9 @@ func GetChannel(group string, model string, retry int) (*Channel, error) {
 	}
 	if err != nil {
 		return nil, err
+	}
+	if len(filters) > 0 && filters[0] != nil {
+		abilities = filterAbilitiesByChannelType(abilities, filters[0])
 	}
 	channel := Channel{}
 	if len(abilities) > 0 {
@@ -141,6 +147,46 @@ func GetChannel(group string, model string, retry int) (*Channel, error) {
 	}
 	err = DB.First(&channel, "id = ?", channel.Id).Error
 	return &channel, err
+}
+
+// filterAbilitiesByChannelType keeps only the abilities whose backing channel
+// type passes the filter. Ability rows do not carry the channel type, so it is
+// resolved with a single lookup against the channels table (cross-DB safe).
+//
+// On lookup failure the original candidate set is returned unchanged (prefer
+// availability over dropping every candidate); this path is only reached when
+// the DB that just served the abilities query fails a trivial follow-up.
+func filterAbilitiesByChannelType(abilities []Ability, filter func(channelType int) bool) []Ability {
+	if len(abilities) == 0 {
+		return abilities
+	}
+	channelIds := make([]int, 0, len(abilities))
+	seen := make(map[int]struct{}, len(abilities))
+	for _, a := range abilities {
+		if _, ok := seen[a.ChannelId]; !ok {
+			seen[a.ChannelId] = struct{}{}
+			channelIds = append(channelIds, a.ChannelId)
+		}
+	}
+	var rows []struct {
+		Id   int
+		Type int
+	}
+	if err := DB.Table("channels").Select("id, type").Where("id IN ?", channelIds).Scan(&rows).Error; err != nil {
+		common.SysError("filterAbilitiesByChannelType: channel type lookup failed: " + err.Error())
+		return abilities
+	}
+	typeById := make(map[int]int, len(rows))
+	for _, r := range rows {
+		typeById[r.Id] = r.Type
+	}
+	filtered := make([]Ability, 0, len(abilities))
+	for _, a := range abilities {
+		if t, ok := typeById[a.ChannelId]; ok && filter(t) {
+			filtered = append(filtered, a)
+		}
+	}
+	return filtered
 }
 
 func (channel *Channel) AddAbilities(tx *gorm.DB) error {

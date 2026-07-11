@@ -93,10 +93,17 @@ func SyncChannelCache(frequency int) {
 	}
 }
 
-func GetRandomSatisfiedChannel(group string, model string, retry int) (*Channel, error) {
+// GetRandomSatisfiedChannel returns a random enabled channel serving (group, model)
+// at the priority tier selected by retry, weighted by channel weight.
+//
+// An optional filter may be supplied to restrict the candidate set by channel
+// type (e.g. to match a task vs. synchronous endpoint). When no filter is
+// supplied (the common case), behavior is byte-for-byte identical to before:
+// the filter block is skipped entirely.
+func GetRandomSatisfiedChannel(group string, model string, retry int, filters ...func(channelType int) bool) (*Channel, error) {
 	// if memory cache is disabled, get channel directly from database
 	if !common.MemoryCacheEnabled {
-		return GetChannel(group, model, retry)
+		return GetChannel(group, model, retry, filters...)
 	}
 
 	channelSyncLock.RLock()
@@ -109,6 +116,20 @@ func GetRandomSatisfiedChannel(group string, model string, retry int) (*Channel,
 	if len(channels) == 0 {
 		normalizedModel := ratio_setting.FormatMatchingModelName(model)
 		channels = group2model2channels[group][normalizedModel]
+	}
+
+	// Optional channel-type filter (e.g. task vs. synchronous endpoint match).
+	// Applied before all downstream length/priority/weight logic so that a
+	// filtered-out candidate is treated exactly like "no such channel".
+	if len(filters) > 0 && filters[0] != nil {
+		filter := filters[0]
+		filtered := make([]int, 0, len(channels))
+		for _, channelId := range channels {
+			if channel, ok := channelsIDM[channelId]; ok && filter(channel.Type) {
+				filtered = append(filtered, channelId)
+			}
+		}
+		channels = filtered
 	}
 
 	if len(channels) == 0 {

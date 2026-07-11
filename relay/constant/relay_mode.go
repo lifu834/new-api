@@ -58,6 +58,30 @@ const (
 	RelayModeImageAsyncFetchByID
 )
 
+// IsTaskRelayMode reports whether a relay mode belongs to the asynchronous task
+// framework (served by controller.RelayTask / RelayTaskFetch), as opposed to a
+// synchronous relay (chat, embeddings, sync image generation, etc.).
+//
+// It is used by channel selection to route task-submit requests to a task-type
+// channel (one that exposes a task adaptor) and every other request to a
+// synchronous channel. The fetch-by-id modes never select a channel
+// (shouldSelectChannel=false), but are included defensively so that any future
+// path which does select for them still lands on a task channel.
+func IsTaskRelayMode(relayMode int) bool {
+	switch relayMode {
+	case RelayModeSunoSubmit,
+		RelayModeSunoFetch,
+		RelayModeSunoFetchByID,
+		RelayModeVideoSubmit,
+		RelayModeVideoFetchByID,
+		RelayModeImageAsyncSubmit,
+		RelayModeImageAsyncFetchByID:
+		return true
+	default:
+		return false
+	}
+}
+
 func Path2RelayMode(path string) int {
 	relayMode := RelayModeUnknown
 	if strings.HasPrefix(path, "/v1/chat/completions") || strings.HasPrefix(path, "/pg/chat/completions") {
