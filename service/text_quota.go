@@ -27,6 +27,7 @@ type textQuotaSummary struct {
 	CacheCreationTokens      int
 	CacheCreationTokens5m    int
 	CacheCreationTokens1h    int
+	CacheCreationSynthetic   bool
 	ImageTokens              int
 	AudioTokens              int
 	ModelName                string
@@ -206,6 +207,20 @@ func calculateTextQuotaSummary(ctx *gin.Context, relayInfo *relaycommon.RelayInf
 		summary.PromptTokens -= summary.CacheCreationTokens
 	}
 
+	// 订阅型 OpenAI 上游(号池/采购转售)不申报 cache_write_tokens(实测恒 0),但物理写入
+	// 真实发生。对显式配置前缀的模型按官方语义「未命中输入即写入」推定缓存写量;
+	// 真实申报(>0)永远优先。1024 为官方最小可缓存长度。
+	if summary.CacheCreationTokens == 0 && !summary.IsClaudeUsageSemantic && !legacyClaudeDerived &&
+		!isOpenRouterClaudeBilling && !relayInfo.PriceData.UsePrice &&
+		summary.PromptTokens >= 1024 &&
+		operation_setting.MatchSyntheticCacheWriteModel(summary.ModelName) {
+		synthetic := summary.PromptTokens - summary.CacheTokens - summary.ImageTokens - summary.AudioTokens
+		if synthetic > 0 {
+			summary.CacheCreationTokens = synthetic
+			summary.CacheCreationSynthetic = true
+		}
+	}
+
 	dPromptTokens := decimal.NewFromInt(int64(summary.PromptTokens))
 	dCacheTokens := decimal.NewFromInt(int64(summary.CacheTokens))
 	dImageTokens := decimal.NewFromInt(int64(summary.ImageTokens))
@@ -270,6 +285,11 @@ func calculateTextQuotaSummary(ctx *gin.Context, relayInfo *relaycommon.RelayInf
 			}
 		}
 
+		if baseTokens.IsNegative() {
+			// 上游畸形 usage 防御(读+写>prompt,OpenAI 发布初期出现过):基数不为负,
+			// 只按缓存桶计费,不让负基数抵扣
+			baseTokens = decimal.Zero
+		}
 		promptQuota := baseTokens.Add(cachedTokensWithRatio).Add(imageTokensWithRatio).Add(cachedCreationTokensWithRatio)
 		completionQuota := dCompletionTokens.Mul(dCompletionRatio)
 		quotaCalculateDecimal := promptQuota.Add(completionQuota).Mul(ratio)
@@ -430,6 +450,10 @@ func PostTextConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, us
 	if summary.CacheCreationTokens > 0 {
 		other["cache_creation_tokens"] = summary.CacheCreationTokens
 		other["cache_creation_ratio"] = summary.CacheCreationRatio
+	}
+	if summary.CacheCreationSynthetic {
+		// 该缓存写量为本站按「未命中输入」推定(上游未申报),对账时与真实申报区分
+		other["cache_creation_synthetic"] = true
 	}
 	if summary.CacheCreationTokens5m > 0 {
 		other["cache_creation_tokens_5m"] = summary.CacheCreationTokens5m

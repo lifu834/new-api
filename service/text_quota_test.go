@@ -9,6 +9,7 @@ import (
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/pkg/billingexpr"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	"github.com/QuantumNous/new-api/setting/operation_setting"
 	"github.com/QuantumNous/new-api/types"
 
 	"github.com/gin-gonic/gin"
@@ -489,4 +490,77 @@ func TestInputTokenDetailsCacheCreationTokensFallbackOrder(t *testing.T) {
 
 	writeOnly := &dto.InputTokenDetails{CacheWriteTokens: 9}
 	require.Equal(t, 9, writeOnly.GetCacheCreationTokens())
+}
+
+func TestCalculateTextQuotaSummarySynthesizesOpenAICacheWrite(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	w := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(w)
+
+	operation_setting.SyntheticCacheWriteModelsFromString("gpt-5.6")
+	defer operation_setting.SyntheticCacheWriteModelsFromString("")
+
+	priceData := types.PriceData{
+		ModelRatio:         1,
+		CompletionRatio:    1,
+		CacheRatio:         0.1,
+		CacheCreationRatio: 1.25,
+		GroupRatioInfo: types.GroupRatioInfo{
+			GroupRatio: 1,
+		},
+	}
+	newRelayInfo := func() *relaycommon.RelayInfo {
+		return &relaycommon.RelayInfo{
+			RelayFormat:             types.RelayFormatOpenAI,
+			FinalRequestRelayFormat: types.RelayFormatOpenAI,
+			OriginModelName:         "gpt-5.6-sol",
+			PriceData:               priceData,
+			StartTime:               time.Now(),
+		}
+	}
+
+	// 上游申报 write=0(订阅型后端)→ 推定 write = prompt - cached = 1400
+	usage := &dto.Usage{
+		PromptTokens: 2000,
+		PromptTokensDetails: dto.InputTokenDetails{
+			CachedTokens: 600,
+		},
+	}
+	summary := calculateTextQuotaSummary(ctx, newRelayInfo(), usage)
+	require.Equal(t, 1400, summary.CacheCreationTokens)
+	require.True(t, summary.CacheCreationSynthetic)
+	// base(2000-600-1400)=0 + 600*0.1 + 1400*1.25 = 1810
+	require.Equal(t, 1810, summary.Quota)
+
+	// 真实申报优先:上游报 write=300 → 不推定
+	usageReal := &dto.Usage{
+		PromptTokens: 2000,
+		PromptTokensDetails: dto.InputTokenDetails{
+			CachedTokens:     600,
+			CacheWriteTokens: 300,
+		},
+	}
+	summaryReal := calculateTextQuotaSummary(ctx, newRelayInfo(), usageReal)
+	require.Equal(t, 300, summaryReal.CacheCreationTokens)
+	require.False(t, summaryReal.CacheCreationSynthetic)
+	// base(2000-600-300)=1100 + 60 + 375 = 1535
+	require.Equal(t, 1535, summaryReal.Quota)
+
+	// prompt < 1024(官方最小可缓存长度)→ 不推定
+	usageSmall := &dto.Usage{
+		PromptTokens: 1000,
+		PromptTokensDetails: dto.InputTokenDetails{
+			CachedTokens: 0,
+		},
+	}
+	summarySmall := calculateTextQuotaSummary(ctx, newRelayInfo(), usageSmall)
+	require.Equal(t, 0, summarySmall.CacheCreationTokens)
+	require.False(t, summarySmall.CacheCreationSynthetic)
+
+	// 模型前缀不匹配 → 不推定
+	operation_setting.SyntheticCacheWriteModelsFromString("gpt-5.7")
+	summaryOff := calculateTextQuotaSummary(ctx, newRelayInfo(), usage)
+	require.Equal(t, 0, summaryOff.CacheCreationTokens)
+	// 1400*1.0 + 600*0.1 = 1460
+	require.Equal(t, 1460, summaryOff.Quota)
 }
