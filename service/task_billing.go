@@ -50,6 +50,13 @@ func LogTaskConsumption(c *gin.Context, info *relaycommon.RelayInfo) {
 		other["is_model_mapped"] = true
 		other["upstream_model_name"] = info.UpstreamModelName
 	}
+	// Tiered-expression tasks (e.g. gpt-image-2): overlay billing_mode/expr/
+	// matched_tier so the usage-log UI renders the tier breakdown instead of a
+	// misleading "$0.00/call" (model_price is 0 for tiered — the charge is the
+	// expression's tier quota, already in info.PriceData.Quota).
+	if info.TieredBillingSnapshot != nil {
+		InjectTieredBillingInfo(other, info, nil)
+	}
 	model.RecordConsumeLog(c, info.UserId, model.RecordConsumeLogParams{
 		ChannelId: info.ChannelId,
 		ModelName: info.OriginModelName,

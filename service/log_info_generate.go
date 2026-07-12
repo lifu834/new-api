@@ -280,5 +280,9 @@ func InjectTieredBillingInfo(other map[string]interface{}, relayInfo *relaycommo
 	other["expr_b64"] = base64.StdEncoding.EncodeToString([]byte(snap.ExprString))
 	if result != nil {
 		other["matched_tier"] = result.MatchedTier
+	} else if snap.EstimatedTier != "" {
+		// Task path (per-call tiered) has no live TieredResult at log time; the
+		// matched tier was frozen into the snapshot at submit.
+		other["matched_tier"] = snap.EstimatedTier
 	}
 }
