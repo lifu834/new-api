@@ -249,6 +249,13 @@ func (a *TaskAdaptor) BuildRequestURL(info *relaycommon.RelayInfo) (string, erro
 // by BuildRequestBody.
 func (a *TaskAdaptor) BuildRequestHeader(c *gin.Context, req *http.Request, info *relaycommon.RelayInfo) error {
 	req.Header.Set("Authorization", "Bearer "+a.apiKey)
+	// Mirror the sync channel's header_override {"X-User-Tier":"{user_group}"}:
+	// the task path never applies channel header overrides (DoTaskApiRequest only
+	// calls BuildRequestHeader), so without this the upstream would route vvip
+	// users through the regular pipeline while billing still tiers them.
+	if info != nil && info.UserGroup != "" {
+		req.Header.Set("X-User-Tier", info.UserGroup)
+	}
 	if a.isEdits {
 		if ct := c.GetString("image_async_ct"); ct != "" {
 			req.Header.Set("Content-Type", ct)
