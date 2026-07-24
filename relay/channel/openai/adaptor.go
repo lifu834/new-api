@@ -427,6 +427,14 @@ func (a *Adaptor) ConvertImageRequest(c *gin.Context, info *relaycommon.RelayInf
 	switch info.RelayMode {
 	case relayconstant.RelayModeImagesEdits:
 
+		// 客户端以 JSON(base64/URL 图片)发起图片编辑时,直接原样转发 JSON,
+		// 上游 OpenAI-兼容后端(如 chatgpt2api)原生支持 JSON 图片编辑;仅 multipart
+		// 才走下面的重编码。修复 Codex 图生图 "failed to parse multipart form"(JSON 体
+		// 被 valid_request 的 fallthrough 分支按 JSON 解析,却在此处被当 multipart 处理)。
+		if !strings.Contains(c.Request.Header.Get("Content-Type"), "multipart/form-data") {
+			return request, nil
+		}
+
 		var requestBody bytes.Buffer
 		writer := multipart.NewWriter(&requestBody)
 
