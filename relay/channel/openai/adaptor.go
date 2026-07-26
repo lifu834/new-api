@@ -31,6 +31,7 @@ import (
 	"github.com/QuantumNous/new-api/setting/reasoning"
 	"github.com/QuantumNous/new-api/types"
 	"github.com/samber/lo"
+	"github.com/tidwall/sjson"
 
 	"github.com/gin-gonic/gin"
 )
@@ -423,6 +424,37 @@ func (a *Adaptor) ConvertAudioRequest(c *gin.Context, info *relaycommon.RelayInf
 	}
 }
 
+// convertJSONImageEditRequest 透传以 JSON 发起的图片编辑请求体，只改写模型名。
+//
+// 背景：dto.ImageRequest 只认识 `image`(单数)字段，客户端用 `images`(复数，Codex 内置
+// imagegen 的形式)、`image_url`、`mask`、`input_fidelity` 等字段时都会落进 Extra，而
+// ImageRequest.MarshalJSON 明确不合并 Extra —— 重新序列化后图片字段整体丢失，上游只会看到
+// 一个没有任何图片的请求并报 "image file or image_url is required"。
+//
+// 因此这里不再重新序列化结构体，而是原样透传客户端原始 JSON，仅把 model 改写成渠道映射后的
+// 模型名(ModelMappedHelper 已把结果写进 request.Model)。返回 json.RawMessage 而非
+// *bytes.Buffer，是为了让上层的参数覆盖(ParamOverride)与调试日志继续生效。
+func convertJSONImageEditRequest(c *gin.Context, request dto.ImageRequest) (any, error) {
+	storage, err := common.GetBodyStorage(c)
+	if err != nil {
+		return request, nil
+	}
+	raw, err := storage.Bytes()
+	if err != nil || common.GetJsonType(raw) != "object" {
+		return request, nil
+	}
+	body := make([]byte, len(raw))
+	copy(body, raw)
+	if request.Model != "" {
+		patched, err := sjson.SetBytes(body, "model", request.Model)
+		if err != nil {
+			return request, nil
+		}
+		body = patched
+	}
+	return json.RawMessage(body), nil
+}
+
 func (a *Adaptor) ConvertImageRequest(c *gin.Context, info *relaycommon.RelayInfo, request dto.ImageRequest) (any, error) {
 	switch info.RelayMode {
 	case relayconstant.RelayModeImagesEdits:
@@ -431,7 +463,11 @@ func (a *Adaptor) ConvertImageRequest(c *gin.Context, info *relaycommon.RelayInf
 		// 上游 OpenAI-兼容后端(如 chatgpt2api)原生支持 JSON 图片编辑;仅 multipart
 		// 才走下面的重编码。修复 Codex 图生图 "failed to parse multipart form"(JSON 体
 		// 被 valid_request 的 fallthrough 分支按 JSON 解析,却在此处被当 multipart 处理)。
-		if !strings.Contains(c.Request.Header.Get("Content-Type"), "multipart/form-data") {
+		contentType := c.Request.Header.Get("Content-Type")
+		if !strings.Contains(contentType, "multipart/form-data") {
+			if strings.Contains(contentType, "application/json") {
+				return convertJSONImageEditRequest(c, request)
+			}
 			return request, nil
 		}
 
