@@ -49,6 +49,14 @@ func HandleGroupRatio(ctx *gin.Context, relayInfo *relaycommon.RelayInfo) types.
 		relayInfo.UsingGroup = autoGroup.(string)
 	}
 
+	// 豁免分组倍率的模型（按次计价，如生图）：无论从哪个分组调用都按标价原样收费。
+	// 必须在 GroupGroupRatio / GroupRatio 解析之前 return，两者都不得生效。
+	// 放在 auto_group 之后，是为了不影响 UsingGroup 的改写（渠道选择与日志仍看真实分组）。
+	if billing_setting.IsGroupRatioIgnored(relayInfo.OriginModelName) {
+		logger.LogDebug(ctx, fmt.Sprintf("model %s ignores group ratio, using 1.0", relayInfo.OriginModelName))
+		return groupRatioInfo
+	}
+
 	// check user group special ratio
 	userGroupRatio, ok := ratio_setting.GetGroupGroupRatio(relayInfo.UserGroup, relayInfo.UsingGroup)
 	if ok {

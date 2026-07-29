@@ -47,8 +47,11 @@ import GroupTable from './components/GroupTable';
 import AutoGroupList from './components/AutoGroupList';
 import GroupGroupRatioRules from './components/GroupGroupRatioRules';
 import GroupSpecialUsableRules from './components/GroupSpecialUsableRules';
+import IgnoreGroupRatioModels from './components/IgnoreGroupRatioModels';
 
 const { Text, Title, Paragraph } = Typography;
+
+const IGNORE_GROUP_RATIO_KEY = 'billing_setting.ignore_group_ratio';
 
 const OPTION_KEYS = [
   'GroupRatio',
@@ -57,6 +60,7 @@ const OPTION_KEYS = [
   'group_ratio_setting.group_special_usable_group',
   'AutoGroups',
   'DefaultUseAutoGroup',
+  IGNORE_GROUP_RATIO_KEY,
 ];
 
 function parseJSONSafe(str, fallback) {
@@ -81,6 +85,7 @@ export default function GroupRatioSettings(props) {
     'group_ratio_setting.group_special_usable_group': '',
     AutoGroups: '',
     DefaultUseAutoGroup: false,
+    [IGNORE_GROUP_RATIO_KEY]: '[]',
   });
   const refForm = useRef();
   const [inputsRow, setInputsRow] = useState(inputs);
@@ -146,6 +151,11 @@ export default function GroupRatioSettings(props) {
         currentInputs[key] = props.options[key];
       }
     }
+    // 该项首次配置前后端还没有这条 option，缺省补上：compareObjects 要求键在
+    // 编辑前后两份对象里都存在才会被识别为改动，否则首次保存会静默无效。
+    if (currentInputs[IGNORE_GROUP_RATIO_KEY] === undefined) {
+      currentInputs[IGNORE_GROUP_RATIO_KEY] = '[]';
+    }
     setInputs(currentInputs);
     setInputsRow(structuredClone(currentInputs));
     dataVersionRef.current += 1;
@@ -174,6 +184,10 @@ export default function GroupRatioSettings(props) {
       ...prev,
       'group_ratio_setting.group_special_usable_group': value,
     }));
+  }, []);
+
+  const handleIgnoreGroupRatioChange = useCallback((value) => {
+    setInputs((prev) => ({ ...prev, [IGNORE_GROUP_RATIO_KEY]: value }));
   }, []);
 
   const dv = dataVersionRef.current;
@@ -248,6 +262,17 @@ export default function GroupRatioSettings(props) {
           value={inputs['group_ratio_setting.group_special_usable_group']}
           groupNames={groupNames}
           onChange={handleSpecialUsableChange}
+        />
+      </Form.Section>
+
+      <Form.Section text={t('不叠加分组倍率的模型')}>
+        <Text type='tertiary' size='small' style={{ display: 'block', marginBottom: 12 }}>
+          {t('列出的模型按标价原价计费，不再乘以任何分组倍率。用于按次计价的模型（如生图）——同一个模型挂在多个分组下时，避免被低倍率分组把单次价格稀释到成本线以下')}
+        </Text>
+        <IgnoreGroupRatioModels
+          key={`igr_${dv}`}
+          value={inputs[IGNORE_GROUP_RATIO_KEY]}
+          onChange={handleIgnoreGroupRatioChange}
         />
       </Form.Section>
     </Form>
@@ -337,6 +362,51 @@ export default function GroupRatioSettings(props) {
               ]}
               onChange={(value) =>
                 setInputs((prev) => ({ ...prev, GroupGroupRatio: value }))
+              }
+            />
+          </Col>
+        </Row>
+        <Row gutter={16}>
+          <Col xs={24} sm={16}>
+            <Form.TextArea
+              label={t('不叠加分组倍率的模型')}
+              placeholder={t('为一个 JSON 字符串数组')}
+              extraText={t(
+                '数组中的模型按标价原价计费，分组倍率一律按 1.0 处理。支持精确模型名与 * 结尾的前缀通配，例如：["gpt-image-2*", "dall-e-3"]。不允许裸 "*"（会豁免全站模型）。清空请填 []',
+              )}
+              field={IGNORE_GROUP_RATIO_KEY}
+              autosize={{ minRows: 3, maxRows: 8 }}
+              trigger='blur'
+              stopValidateWithError
+              rules={[
+                {
+                  validator: (rule, value) => {
+                    if (!value || value.trim() === '') return true;
+                    try {
+                      const parsed = JSON.parse(value);
+                      if (!Array.isArray(parsed)) return false;
+                      return parsed.every(
+                        (item) =>
+                          typeof item === 'string' &&
+                          item.trim() !== '' &&
+                          item.trim() !== '*' &&
+                          (item.match(/\*/g) || []).length <= 1 &&
+                          (!item.includes('*') || item.trim().endsWith('*')),
+                      );
+                    } catch {
+                      return false;
+                    }
+                  },
+                  message: t(
+                    '必须是 JSON 字符串数组，且通配符 * 只能出现一次并位于结尾，例如：["gpt-image-2*"]',
+                  ),
+                },
+              ]}
+              onChange={(value) =>
+                setInputs((prev) => ({
+                  ...prev,
+                  [IGNORE_GROUP_RATIO_KEY]: value,
+                }))
               }
             />
           </Col>

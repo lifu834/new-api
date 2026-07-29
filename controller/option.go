@@ -8,6 +8,7 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/setting"
+	"github.com/QuantumNous/new-api/setting/billing_setting"
 	"github.com/QuantumNous/new-api/setting/console_setting"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
@@ -243,6 +244,37 @@ func UpdateOption(c *gin.Context) {
 			})
 			return
 		}
+	case "billing_setting." + billing_setting.IgnoreGroupRatioField:
+		patterns := []string{}
+		raw := strings.TrimSpace(option.Value.(string))
+		if raw != "" {
+			if err = common.UnmarshalJsonStr(raw, &patterns); err != nil {
+				c.JSON(http.StatusOK, gin.H{
+					"success": false,
+					"message": "不叠加分组倍率的模型必须是 JSON 字符串数组，例如 [\"gpt-image-2*\"]",
+				})
+				return
+			}
+		}
+		if err = billing_setting.ValidateIgnoreGroupRatio(patterns); err != nil {
+			c.JSON(http.StatusOK, gin.H{
+				"success": false,
+				"message": err.Error(),
+			})
+			return
+		}
+		// 归一化后再存：①空值必须写成 "[]" 而不是 ""——配置系统的切片字段用
+		// json.Unmarshal 解析，空串会解析失败并**保留旧值**，导致"清空名单"静默失效；
+		// ②顺手去掉首尾空格，避免手输空格造成匹配不上。
+		for i := range patterns {
+			patterns[i] = strings.TrimSpace(patterns[i])
+		}
+		normalized, marshalErr := common.Marshal(patterns)
+		if marshalErr != nil {
+			common.ApiError(c, marshalErr)
+			return
+		}
+		option.Value = string(normalized)
 	case "ModelRequestRateLimitGroup":
 		err = setting.CheckModelRequestRateLimitGroup(option.Value.(string))
 		if err != nil {
