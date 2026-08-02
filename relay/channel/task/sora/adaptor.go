@@ -21,6 +21,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/pkg/errors"
+	"github.com/tidwall/gjson"
 	"github.com/tidwall/sjson"
 )
 
@@ -326,6 +327,21 @@ func (a *TaskAdaptor) ConvertToOpenAIVideo(task *model.Task) ([]byte, error) {
 	var err error
 	if data, err = sjson.SetBytes(data, "id", task.TaskID); err != nil {
 		return nil, errors.Wrap(err, "set id failed")
+	}
+	// task.Data 是上游原始响应：task_id 是上游任务号，video_url/metadata.url 是上游直链，
+	// 原样透传会暴露上游身份 —— 统一改写为公开任务号与本站 /content 代理地址。
+	if gjson.GetBytes(data, "task_id").Exists() {
+		if data, err = sjson.SetBytes(data, "task_id", task.TaskID); err != nil {
+			return nil, errors.Wrap(err, "set task_id failed")
+		}
+	}
+	proxyURL := taskcommon.BuildProxyURL(task.TaskID)
+	for _, path := range []string{"video_url", "metadata.url"} {
+		if gjson.GetBytes(data, path).Exists() {
+			if data, err = sjson.SetBytes(data, path, proxyURL); err != nil {
+				return nil, errors.Wrapf(err, "set %s failed", path)
+			}
+		}
 	}
 	return data, nil
 }
