@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/model"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/setting/system_setting"
@@ -62,8 +63,13 @@ func DecodeLocalTaskID(id string) (string, error) {
 
 // BuildProxyURL constructs the video proxy URL using the public task ID.
 // e.g., "https://your-server.com/v1/videos/task_xxxx/content"
+// 优先使用 VIDEO_PROXY_BASE_URL（ServerAddress 可能指向无 /v1 路由的前端域名）。
 func BuildProxyURL(taskID string) string {
-	return fmt.Sprintf("%s/v1/videos/%s/content", system_setting.ServerAddress, taskID)
+	base := constant.VideoProxyBaseURL
+	if base == "" {
+		base = system_setting.ServerAddress
+	}
+	return fmt.Sprintf("%s/v1/videos/%s/content", base, taskID)
 }
 
 // Status-to-progress mapping constants for polling updates.

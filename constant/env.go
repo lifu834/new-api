@@ -33,6 +33,10 @@ var TaskCallbackSecret string
 // temporary variable for sora patch, will be removed in future
 var TaskPricePatches []string
 
+// VideoProxyBaseURL 是视频成片代理地址（/v1/videos/{id}/content）的对外基址。
+// ServerAddress 指向前端域名（无 /v1 路由）时必须设置本变量为 API 域名；为空时回退 ServerAddress。
+var VideoProxyBaseURL string
+
 // TrustedRedirectDomains is a list of trusted domains for redirect URL validation.
 // Domains support subdomain matching (e.g., "example.com" matches "sub.example.com").
 var TrustedRedirectDomains []string

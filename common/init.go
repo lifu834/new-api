@@ -180,6 +180,8 @@ func initConstantEnv() {
 	constant.TaskCallbackBaseURL = strings.TrimRight(GetEnvOrDefaultString("TASK_CALLBACK_BASE_URL", ""), "/")
 	constant.TaskCallbackSecret = GetEnvOrDefaultString("TASK_CALLBACK_SECRET", "")
 
+	constant.VideoProxyBaseURL = strings.TrimRight(GetEnvOrDefaultString("VIDEO_PROXY_BASE_URL", ""), "/")
+
 	soraPatchStr := GetEnvOrDefaultString("TASK_PRICE_PATCH", "")
 	if soraPatchStr != "" {
 		var taskPricePatches []string
