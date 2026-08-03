@@ -2,6 +2,7 @@ package sora
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"io"
 	"mime/multipart"
@@ -49,7 +50,7 @@ type responseTask struct {
 	CreatedAt          int64  `json:"created_at"`
 	CompletedAt        int64  `json:"completed_at,omitempty"`
 	ExpiresAt          int64  `json:"expires_at,omitempty"`
-	Seconds            string `json:"seconds,omitempty"`
+	Seconds            json.RawMessage `json:"seconds,omitempty"` // 上游可能回字符串("5")或数字(5)，原样保留避免解析失败
 	Size               string `json:"size,omitempty"`
 	RemixedFromVideoID string `json:"remixed_from_video_id,omitempty"`
 	Error              *struct {
