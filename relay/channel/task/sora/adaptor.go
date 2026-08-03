@@ -343,5 +343,19 @@ func (a *TaskAdaptor) ConvertToOpenAIVideo(task *model.Task) ([]byte, error) {
 			}
 		}
 	}
+	// download_url 是上游给的相对路径，内含上游 task_id —— 换成本站公开路径。
+	if gjson.GetBytes(data, "download_url").Exists() {
+		if data, err = sjson.SetBytes(data, "download_url",
+			fmt.Sprintf("/v1/videos/%s/content", task.TaskID)); err != nil {
+			return nil, errors.Wrap(err, "set download_url failed")
+		}
+	}
+	// 渠道级模型映射后，上游回的是映射目标名（如 firefly-video-v2-fast），
+	// 会同时暴露上游身份并让用户看到陌生模型名 —— 还原成用户请求的对外名。
+	if origin := task.Properties.OriginModelName; origin != "" && gjson.GetBytes(data, "model").Exists() {
+		if data, err = sjson.SetBytes(data, "model", origin); err != nil {
+			return nil, errors.Wrap(err, "set model failed")
+		}
+	}
 	return data, nil
 }
