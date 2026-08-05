@@ -30,6 +30,7 @@ import (
 	"github.com/QuantumNous/new-api/relay/channel/replicate"
 	"github.com/QuantumNous/new-api/relay/channel/siliconflow"
 	"github.com/QuantumNous/new-api/relay/channel/submodel"
+	taskadobe2api "github.com/QuantumNous/new-api/relay/channel/task/adobe2api"
 	taskali "github.com/QuantumNous/new-api/relay/channel/task/ali"
 	taskchatgpt2api "github.com/QuantumNous/new-api/relay/channel/task/chatgpt2api"
 	taskdoubao "github.com/QuantumNous/new-api/relay/channel/task/doubao"
@@ -162,6 +163,8 @@ func GetTaskAdaptor(platform constant.TaskPlatform) channel.TaskAdaptor {
 			return &hailuo.TaskAdaptor{}
 		case constant.ChannelTypeChatGPT2ApiImage:
 			return &taskchatgpt2api.TaskAdaptor{}
+		case constant.ChannelTypeAdobe2ApiVideo:
+			return &taskadobe2api.TaskAdaptor{}
 		}
 	}
 	return nil
