@@ -466,5 +466,16 @@ func (a *TaskAdaptor) ConvertToOpenAIVideo(task *model.Task) ([]byte, error) {
 			return nil, errors.Wrap(err, "set model failed")
 		}
 	}
+	// 失败时 task.Data 里是上游原始串（如 "FAILED: MODERATION_ERROR"），对用户毫无意义。
+	// task.FailReason 已在 ParseTaskResult 翻译成可行动的中文，这里替换进去，
+	// 并同时写入 error.message 供只读该字段的客户端使用。
+	if task.Status == model.TaskStatusFailure && task.FailReason != "" {
+		if data, err = sjson.SetBytes(data, "status", "FAILED: "+task.FailReason); err != nil {
+			return nil, errors.Wrap(err, "set status failed")
+		}
+		if data, err = sjson.SetBytes(data, "error.message", task.FailReason); err != nil {
+			return nil, errors.Wrap(err, "set error.message failed")
+		}
+	}
 	return data, nil
 }

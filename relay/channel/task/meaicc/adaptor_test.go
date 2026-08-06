@@ -144,3 +144,32 @@ func TestConvertToOpenAIVideoScrubsUpstream(t *testing.T) {
 		t.Errorf("对外字段没写对: %s", s)
 	}
 }
+
+// TestConvertToOpenAIVideoSurfacesFriendlyFailure 锁住失败文案的透出。
+// 260806 生产验证时发现: 库里 fail_reason 已翻译好，但用户查询响应回显的是
+// task.Data 里的上游原始串（"FAILED: MODERATION_ERROR"），等于翻译白做。
+func TestConvertToOpenAIVideoSurfacesFriendlyFailure(t *testing.T) {
+	a := &TaskAdaptor{}
+	task := &model.Task{
+		TaskID:     "task_pub1",
+		Status:     model.TaskStatusFailure,
+		FailReason: "内容未通过上游审核，费用已退还。请调整提示词或参考图后重试",
+		Data:       []byte(`{"id":"vid_x","status":"FAILED: MODERATION_ERROR","model":"sd-2-c6"}`),
+	}
+	task.Properties.OriginModelName = "seedance-2.0-mini"
+
+	out, err := a.ConvertToOpenAIVideo(task)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := string(out)
+	if strings.Contains(s, "MODERATION_ERROR") {
+		t.Errorf("仍在回显上游原始错误串: %s", s)
+	}
+	if !strings.Contains(s, "内容未通过上游审核") {
+		t.Errorf("翻译后的失败原因没透出: %s", s)
+	}
+	if !strings.Contains(s, "已退还") {
+		t.Errorf("未告知已退款，会引发客诉: %s", s)
+	}
+}
