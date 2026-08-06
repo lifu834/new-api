@@ -80,10 +80,23 @@ func (a *TaskAdaptor) EstimateBilling(c *gin.Context, info *relaycommon.RelayInf
 	if modelName == "" {
 		modelName = req.Model
 	}
-	seconds := resolveSeconds(modelName, req.Seconds, req.Duration)
+
+	// A source clip turns a kling request into video-to-video, which is priced
+	// differently -- read the raw body so a top-level `video_url` (not a
+	// TaskSubmitReq field, but passed through verbatim) still bills correctly.
+	var rawBody []byte
+	if storage, err := common.GetBodyStorage(c); err == nil {
+		if b, err := storage.Bytes(); err == nil {
+			rawBody = b
+		}
+	}
+	hasVideo := strings.TrimSpace(req.InputReference) != "" ||
+		hasSourceVideo(rawBody, req.Metadata)
+
+	seconds := resolveSeconds(modelName, req.Seconds, req.Duration, hasVideo)
 	return map[string]float64{
 		"seconds": float64(seconds),
-		"tier":    tierRatio(modelName, req.Size, wantsAudio(req.Metadata)),
+		"tier":    tierRatio(modelName, req.Size, wantsAudio(req.Metadata), hasVideo),
 	}
 }
 

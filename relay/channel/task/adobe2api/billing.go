@@ -3,6 +3,8 @@ package adobe2api
 import (
 	"strconv"
 	"strings"
+
+	"github.com/tidwall/gjson"
 )
 
 // ---------------------------------------------------------------------------
@@ -11,11 +13,16 @@ import (
 // Adobe bills Firefly video in credits, strictly linear in duration with no
 // base fee (measured against bks.adobe.io/v2/credits/cost):
 //
-//	kling3 / kling-o3   720p mute  20/s | 720p audio 25/s
-//	                    1080p mute 25/s | 1080p audio 35/s
-//	kling-v2v           720p       30/s | 1080p      40/s   (audio is free)
+//	kling3 / kling-o3   t2v & i2v:  720p mute  20/s | 720p audio 25/s
+//	                                1080p mute 25/s | 1080p audio 35/s
+//	kling-o3            v2v:        720p       30/s | 1080p      40/s
+//	                                (audio does NOT affect v2v pricing)
 //	veo31 / veo31-ref   50/s                (resolution + audio irrelevant)
 //	veo31-fast          10/s                (resolution + audio irrelevant)
+//
+// v2v is a *mode* of Kling 3.0 Omni, not a separate model: sending a source
+// clip to kling-o3 switches the upstream version to kling_o3_*_v2v_*.  It is
+// priced differently, so the tier ratio has to know whether a clip was sent.
 //
 // The 1080p+audio case is NOT the product of the two individual bumps
 // (1.25 * 1.25 = 1.5625, but the real ratio is 1.75), so the tier cannot be
@@ -25,8 +32,7 @@ import (
 // Configure ModelPrice per model as the CHEAPEST per-second price; this
 // multiplies it back up:
 //
-//	kling3 / kling-o3        -> price of 720p mute
-//	kling-v2v                -> price of 720p
+//	kling3 / kling-o3        -> price of 720p mute t2v (20/s)
 //	veo31 / -ref / -fast     -> flat (tier always 1)
 //
 // NOTE: the switch order in tierRatio/resolveSeconds matters — "kling-v2v"
@@ -37,6 +43,14 @@ const (
 	defaultWidth  = 1280
 	defaultHeight = 720
 )
+
+// sourceVideoKeys are every spelling adobe2api accepts for the v2v source clip.
+// Billing must look in all of them or a caller could get v2v output at t2v
+// prices.
+var sourceVideoKeys = []string{
+	"video_url", "videoUrl", "source_video", "sourceVideo",
+	"input_video", "input_reference", "inputReference",
+}
 
 // parseSize turns "1920x1080" into its two dimensions, falling back to 720p.
 func parseSize(size string) (int, int) {
@@ -63,20 +77,22 @@ func isHD(size string) bool {
 }
 
 // tierRatio returns the per-second cost multiplier over the model's cheapest
-// tier, given the requested geometry and audio flag.
-func tierRatio(model, size string, audio bool) float64 {
+// tier, given the requested geometry, audio flag and whether a source clip
+// was supplied (which turns a kling request into video-to-video).
+func tierRatio(model, size string, audio, hasVideo bool) float64 {
 	m := strings.ToLower(strings.TrimSpace(model))
 	hd := isHD(size)
 
 	switch {
-	case strings.HasPrefix(m, "kling-v2v"):
-		// 720p 30/s, 1080p 40/s — audio does not move the price here.
-		if hd {
-			return 40.0 / 30.0
-		}
-		return 1
 	case strings.HasPrefix(m, "kling"):
-		// base = 720p mute = 20/s
+		// base = 720p mute t2v = 20/s
+		if hasVideo {
+			// v2v: 720p 30/s, 1080p 40/s — audio is not billed here.
+			if hd {
+				return 40.0 / 20.0
+			}
+			return 30.0 / 20.0
+		}
 		switch {
 		case hd && audio:
 			return 35.0 / 20.0
@@ -115,9 +131,60 @@ func wantsAudio(metadata map[string]any) bool {
 	return true
 }
 
+// hasSourceVideo reports whether the caller supplied a v2v source clip.
+//
+// It inspects the RAW body rather than the parsed TaskSubmitReq, because a
+// top-level `video_url` is not a TaskSubmitReq field — it survives to
+// adobe2api via the verbatim body passthrough but would be invisible to
+// billing, letting a caller buy v2v at t2v prices.
+func hasSourceVideo(body []byte, metadata map[string]any) bool {
+	for _, k := range sourceVideoKeys {
+		if v, ok := metadata[k]; ok && nonEmptyValue(v) {
+			return true
+		}
+		if r := gjson.GetBytes(body, k); r.Exists() && nonEmptyString(r) {
+			return true
+		}
+		if r := gjson.GetBytes(body, "metadata."+k); r.Exists() && nonEmptyString(r) {
+			return true
+		}
+	}
+	// OpenAI-style content part: {"type":"video_url","video_url":{"url":...}}
+	for _, m := range gjson.GetBytes(body, "messages").Array() {
+		for _, part := range m.Get("content").Array() {
+			if part.Get("type").String() == "video_url" {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func nonEmptyString(r gjson.Result) bool {
+	if r.IsObject() {
+		return strings.TrimSpace(r.Get("url").String()) != ""
+	}
+	return strings.TrimSpace(r.String()) != ""
+}
+
+func nonEmptyValue(v any) bool {
+	switch t := v.(type) {
+	case string:
+		return strings.TrimSpace(t) != ""
+	case map[string]any:
+		if u, ok := t["url"].(string); ok {
+			return strings.TrimSpace(u) != ""
+		}
+		return len(t) > 0
+	case nil:
+		return false
+	}
+	return true
+}
+
 // resolveSeconds picks the billable duration, mirroring what adobe2api will
 // actually clamp/snap the request to, so the pre-charge matches the real cost.
-func resolveSeconds(model, secondsStr string, duration int) int {
+func resolveSeconds(model, secondsStr string, duration int, hasVideo bool) int {
 	seconds, _ := strconv.Atoi(strings.TrimSpace(secondsStr))
 	if seconds == 0 {
 		seconds = duration
@@ -130,9 +197,11 @@ func resolveSeconds(model, secondsStr string, duration int) int {
 	case strings.HasPrefix(m, "veo31"):
 		// upstream only accepts 4 / 6 / 8 and snaps to the nearest
 		return snap(seconds, []int{4, 6, 8})
-	case strings.HasPrefix(m, "kling-v2v"):
-		return clamp(seconds, 3, 10)
 	case strings.HasPrefix(m, "kling"):
+		if hasVideo {
+			// v2v source clips are bounded to 3..10s upstream
+			return clamp(seconds, 3, 10)
+		}
 		return clamp(seconds, 3, 15)
 	}
 	return clamp(seconds, 1, 60)

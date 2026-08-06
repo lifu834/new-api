@@ -10,7 +10,7 @@ package adobe2api
 var ModelList = []string{
 	"kling3",
 	"kling-o3",
-	"kling-v2v",
+
 	"veo31",
 	"veo31-fast",
 	"veo31-ref",
