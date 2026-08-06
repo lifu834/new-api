@@ -38,6 +38,8 @@ import (
 	"github.com/QuantumNous/new-api/relay/channel/task/hailuo"
 	taskjimeng "github.com/QuantumNous/new-api/relay/channel/task/jimeng"
 	"github.com/QuantumNous/new-api/relay/channel/task/kling"
+	taskmeaicc "github.com/QuantumNous/new-api/relay/channel/task/meaicc"
+	tasksecureskill "github.com/QuantumNous/new-api/relay/channel/task/secureskill"
 	tasksora "github.com/QuantumNous/new-api/relay/channel/task/sora"
 	"github.com/QuantumNous/new-api/relay/channel/task/suno"
 	taskvertex "github.com/QuantumNous/new-api/relay/channel/task/vertex"
@@ -165,6 +167,10 @@ func GetTaskAdaptor(platform constant.TaskPlatform) channel.TaskAdaptor {
 			return &taskchatgpt2api.TaskAdaptor{}
 		case constant.ChannelTypeAdobe2ApiVideo:
 			return &taskadobe2api.TaskAdaptor{}
+		case constant.ChannelTypeMeaiccVideo:
+			return &taskmeaicc.TaskAdaptor{}
+		case constant.ChannelTypeSecureSkillVideo:
+			return &tasksecureskill.TaskAdaptor{}
 		}
 	}
 	return nil

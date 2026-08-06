@@ -109,6 +109,11 @@ func VideoProxy(c *gin.Context) {
 	case constant.ChannelTypeOpenAI, constant.ChannelTypeSora, constant.ChannelTypeAdobe2ApiVideo:
 		videoURL = fmt.Sprintf("%s/v1/videos/%s/content", baseURL, task.GetUpstreamTaskID())
 		req.Header.Set("Authorization", "Bearer "+channel.Key)
+	case constant.ChannelTypeSecureSkillVideo:
+		// secure-skill 完成时直接返回 mp4 二进制，不提供任何可保存的成片直链，
+		// 因此这里按需回源。注意上游对该地址有有效期，过期后会返回 403。
+		videoURL = fmt.Sprintf("%s/api/video/%s", baseURL, task.GetUpstreamTaskID())
+		req.Header.Set("Authorization", "Bearer "+channel.Key)
 	default:
 		// Video URL is stored in PrivateData.ResultURL (fallback to FailReason for old data)
 		videoURL = task.GetResultURL()
