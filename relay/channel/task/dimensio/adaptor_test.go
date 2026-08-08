@@ -105,6 +105,30 @@ func TestCapTableInvariants(t *testing.T) {
 	}
 }
 
+// TestResolutionFromModelName 守住计费正确性：对外名按档位定价
+// （sd-2.0-1080p ¥1.8/秒 vs sd-2.0-720p ¥0.88/秒），而上游分辨率靠
+// resolution 参数带。名字里的档位必须能被解析出来，否则客户按 1080p
+// 付费却拿到 720p。
+func TestResolutionFromModelName(t *testing.T) {
+	cases := []struct{ in, want string }{
+		{"sd-2.0-1080p", "1080p"},
+		{"sd-mini-720p", "720p"},
+		{"sd-fast-720p", "720p"},
+		{"sd-2.0-4k", "4k"},
+		{"sd-2.0-480p", "480p"},
+		{"seedance-2.0-2160p", "4k"},
+		// 不带档位后缀的返回空，交由请求参数决定
+		{"sd-2.0", ""},
+		{"hgf-seedance-2.0", ""},
+		{"", ""},
+	}
+	for _, tc := range cases {
+		if got := resolutionFromModelName(tc.in); got != tc.want {
+			t.Errorf("resolutionFromModelName(%q) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+}
+
 func TestFriendlyReason(t *testing.T) {
 	cases := []struct {
 		code int

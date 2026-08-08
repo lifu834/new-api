@@ -137,6 +137,24 @@ func normalizeResolution(s string) string {
 	return v // 交给能力表判定，无法识别的会被明确拒绝
 }
 
+// resolutionFromModelName 从对外模型名的分辨率后缀推断档位，如
+// sd-2.0-1080p → 1080p、sd-mini-720p → 720p。
+//
+// 🔑 这是**计费正确性**问题，不是便利功能：对外名按档位定价
+// （sd-2.0-1080p 卖 ¥1.8/秒 vs sd-2.0-720p ¥0.88/秒），而上游的分辨率
+// 是靠 resolution 参数带的。若只看请求参数（缺省 720p），客户会按 1080p
+// 付费却拿到 720p 的片子。故模型名里的档位是权威。
+func resolutionFromModelName(name string) string {
+	n := strings.ToLower(strings.TrimSpace(name))
+	// 后缀优先级：长的先匹配，避免 "-2160p" 被 "-4k" 之外的规则截断
+	for _, suf := range []string{"-2160p", "-1080p", "-720p", "-480p", "-4k", "-2k"} {
+		if strings.HasSuffix(n, suf) {
+			return normalizeResolution(strings.TrimPrefix(suf, "-"))
+		}
+	}
+	return ""
+}
+
 func parseWxH(s string) (int, int, bool) {
 	parts := strings.Split(s, "x")
 	if len(parts) != 2 {
@@ -387,7 +405,18 @@ func (a *TaskAdaptor) ValidateRequestAndSetAction(c *gin.Context, info *relaycom
 		return nil
 	}
 
+	// 对外名带档位后缀时以它为准（决定计费的是它）；若用户又显式传了不一致的
+	// resolution，宁可报错也不能默默二选一——两种选法都会造成"付的钱和拿到的货不符"。
 	res := normalizeResolution(resolutionFromRequest(c, &req))
+	if tier := resolutionFromModelName(info.OriginModelName); tier != "" {
+		if raw := strings.TrimSpace(resolutionFromRequest(c, &req)); raw != "" && normalizeResolution(raw) != tier {
+			return service.TaskErrorWrapperLocal(
+				fmt.Errorf("model %s is billed at %s; requested resolution %s conflicts — use the model whose name matches the resolution you want",
+					info.OriginModelName, tier, raw),
+				"invalid_request", http.StatusBadRequest)
+		}
+		res = tier
+	}
 	if _, ok := fitResolution(res, c1); !ok {
 		return service.TaskErrorWrapperLocal(
 			fmt.Errorf("model %s does not support resolution %s; supported: %s",
@@ -439,11 +468,15 @@ func (a *TaskAdaptor) BuildRequestHeader(c *gin.Context, req *http.Request, info
 
 // buildPayload 组请求体。上游的素材字段是**编号顶层键**，无法用固定 struct 表达，
 // 故用 map 动态拼。
-func buildPayload(c *gin.Context, req *relaycommon.TaskSubmitReq, upstreamModel string) map[string]any {
+func buildPayload(c *gin.Context, req *relaycommon.TaskSubmitReq, upstreamModel, originModel string) map[string]any {
 	mats := collectMaterials(c, req)
 	c1, known := capsFor(upstreamModel)
 
 	res := normalizeResolution(resolutionFromRequest(c, req))
+	// 对外名的档位后缀是权威（它决定计费），见 resolutionFromModelName
+	if tier := resolutionFromModelName(originModel); tier != "" {
+		res = tier
+	}
 	if known {
 		if fitted, ok := fitResolution(res, c1); ok {
 			res = fitted
@@ -496,7 +529,7 @@ func (a *TaskAdaptor) BuildRequestBody(c *gin.Context, info *relaycommon.RelayIn
 		return nil, errors.New("task_request has unexpected type")
 	}
 
-	data, err := common.Marshal(buildPayload(c, &req, info.UpstreamModelName))
+	data, err := common.Marshal(buildPayload(c, &req, info.UpstreamModelName, info.OriginModelName))
 	if err != nil {
 		return nil, errors.Wrap(err, "marshal dimensio request failed")
 	}
