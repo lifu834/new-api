@@ -1,6 +1,10 @@
 package dimensio
 
 import (
+	"net/http/httptest"
+
+	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	"github.com/gin-gonic/gin"
 	"testing"
 
 	"github.com/QuantumNous/new-api/model"
@@ -125,6 +129,36 @@ func TestResolutionFromModelName(t *testing.T) {
 	for _, tc := range cases {
 		if got := resolutionFromModelName(tc.in); got != tc.want {
 			t.Errorf("resolutionFromModelName(%q) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+}
+
+// TestEstimateBillingSeconds 守住按秒计费。
+//
+// dimensio 全线按秒，ModelPrice 配的是每秒单价。若沿用 BaseBilling
+// （返回 nil，无 seconds 乘数），一条 4 秒 sd-2.0-720p 只会按 ¥0.88 收而不是
+// ¥3.52，成本却是 ¥2.08 —— 每单亏钱。260808 上线自测实扣 440000 quota 暴露过。
+func TestEstimateBillingSeconds(t *testing.T) {
+	a := &TaskAdaptor{}
+	cases := []struct {
+		req  relaycommon.TaskSubmitReq
+		want float64
+	}{
+		{relaycommon.TaskSubmitReq{Duration: 4}, 4},
+		{relaycommon.TaskSubmitReq{Duration: 15}, 15},
+		{relaycommon.TaskSubmitReq{Seconds: "10"}, 10}, // seconds 字符串形式
+		{relaycommon.TaskSubmitReq{}, 5},               // 缺省与 resolveDuration 一致
+	}
+	for _, tc := range cases {
+		c, _ := gin.CreateTestContext(httptest.NewRecorder())
+		c.Set("task_request", tc.req)
+		got := a.EstimateBilling(c, &relaycommon.RelayInfo{})
+		if got == nil {
+			t.Fatalf("EstimateBilling 返回 nil —— 按秒计费会失效，每单亏钱")
+		}
+		if got["seconds"] != tc.want {
+			t.Errorf("duration=%d seconds=%q => %v, want %v",
+				tc.req.Duration, tc.req.Seconds, got["seconds"], tc.want)
 		}
 	}
 }

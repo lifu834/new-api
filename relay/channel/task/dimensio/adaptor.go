@@ -90,6 +90,23 @@ func (a *TaskAdaptor) Init(info *relaycommon.RelayInfo) {
 func (a *TaskAdaptor) GetModelList() []string { return ModelList }
 func (a *TaskAdaptor) GetChannelName() string { return ChannelName }
 
+// EstimateBilling 提供按秒计费的时长乘数。
+//
+// 🔑 **必须实现，不能沿用 BaseBilling**（它返回 nil）：dimensio 全线按秒计费，
+// 而 ModelPrice 配的是「每秒」单价。没有 seconds 乘数时，一条 4 秒的
+// sd-2.0-720p 只会按 ¥0.88 收（而不是 ¥0.88×4=¥3.52），成本却是 ¥2.08 ——
+// 每单直接亏钱。260808 上线自测时实扣 440000 quota 暴露了这一点。
+//
+// 分辨率不在这里乘：档位差价已经体现在各自的 ModelPrice 里
+// （sd-2.0-720p ¥0.88/秒 vs sd-2.0-1080p ¥1.8/秒），再乘一次会重复计价。
+func (a *TaskAdaptor) EstimateBilling(c *gin.Context, info *relaycommon.RelayInfo) map[string]float64 {
+	req, err := relaycommon.GetTaskRequest(c)
+	if err != nil {
+		return nil
+	}
+	return map[string]float64{"seconds": float64(resolveDuration(&req))}
+}
+
 // ============================
 // 参数归一
 // ============================
@@ -355,6 +372,49 @@ func rewriteReferences(prompt string) string {
 }
 
 // ============================
+// 模型名解析
+// ============================
+
+// originModelOf 取对外模型名。
+// ValidateRequestAndSetAction 在模型映射之前执行（relay_task.go 步骤 1 vs 2.5），
+// info.OriginModelName 此刻可能仍为空，故回退到请求体的 model 字段。
+func originModelOf(info *relaycommon.RelayInfo, req *relaycommon.TaskSubmitReq) string {
+	if s := strings.TrimSpace(info.OriginModelName); s != "" {
+		return s
+	}
+	return strings.TrimSpace(req.Model)
+}
+
+// upstreamModelOf 解析真正会发给上游的模型名。
+//
+// 🔑 260808 实测踩到：校验发生在 ModelMappedHelper **之前**，此时
+// info.UpstreamModelName 还是对外名（如 sd-2.0-720p），拿它查 modelCapTable
+// 永远查不到 → capsFor 返回 not-known → **全部前置校验静默失效**。
+// 这里复用与 ModelMappedHelper 相同的数据源自行解析一次，保证校验在
+// 预扣费之前生效（能返回 400，而不是扣了钱再报 500）。
+func upstreamModelOf(c *gin.Context, origin string) string {
+	mapping := c.GetString("model_mapping")
+	if mapping == "" || mapping == "{}" {
+		return origin
+	}
+	m := map[string]string{}
+	if err := common.UnmarshalJsonStr(mapping, &m); err != nil {
+		return origin
+	}
+	// 链式重定向 + 防环，与 ModelMappedHelper 行为一致
+	cur := origin
+	seen := map[string]bool{cur: true}
+	for {
+		next, ok := m[cur]
+		if !ok || next == "" || seen[next] {
+			return cur
+		}
+		seen[next] = true
+		cur = next
+	}
+}
+
+// ============================
 // 请求校验
 // ============================
 
@@ -398,36 +458,39 @@ func (a *TaskAdaptor) ValidateRequestAndSetAction(c *gin.Context, info *relaycom
 			"invalid_request", http.StatusBadRequest)
 	}
 
+	origin := originModelOf(info, &req)
+
+	// 对外名带档位后缀时以它为准（决定计费的是它）；若用户又显式传了不一致的
+	// resolution，宁可报错也不能默默二选一——两种选法都会造成"付的钱和拿到的货不符"。
+	res := normalizeResolution(resolutionFromRequest(c, &req))
+	if tier := resolutionFromModelName(origin); tier != "" {
+		if raw := strings.TrimSpace(resolutionFromRequest(c, &req)); raw != "" && normalizeResolution(raw) != tier {
+			return service.TaskErrorWrapperLocal(
+				fmt.Errorf("model %s is billed at %s; requested resolution %s conflicts — use the model whose name matches the resolution you want",
+					origin, tier, raw),
+				"invalid_request", http.StatusBadRequest)
+		}
+		res = tier
+	}
+
 	// 以下校验依赖目标上游模型的能力表；模型未知时放行（新模型不至于被误拦）
-	c1, known := capsFor(info.UpstreamModelName)
+	c1, known := capsFor(upstreamModelOf(c, origin))
 	if !known {
 		c.Set("task_request", req)
 		return nil
 	}
 
-	// 对外名带档位后缀时以它为准（决定计费的是它）；若用户又显式传了不一致的
-	// resolution，宁可报错也不能默默二选一——两种选法都会造成"付的钱和拿到的货不符"。
-	res := normalizeResolution(resolutionFromRequest(c, &req))
-	if tier := resolutionFromModelName(info.OriginModelName); tier != "" {
-		if raw := strings.TrimSpace(resolutionFromRequest(c, &req)); raw != "" && normalizeResolution(raw) != tier {
-			return service.TaskErrorWrapperLocal(
-				fmt.Errorf("model %s is billed at %s; requested resolution %s conflicts — use the model whose name matches the resolution you want",
-					info.OriginModelName, tier, raw),
-				"invalid_request", http.StatusBadRequest)
-		}
-		res = tier
-	}
 	if _, ok := fitResolution(res, c1); !ok {
 		return service.TaskErrorWrapperLocal(
 			fmt.Errorf("model %s does not support resolution %s; supported: %s",
-				info.OriginModelName, res, sortedKeys(c1.Resolutions)),
+				origin, res, sortedKeys(c1.Resolutions)),
 			"invalid_request", http.StatusBadRequest)
 	}
 
 	if r := strings.TrimSpace(ratioFromRequest(c, &req)); r != "" && !c1.Ratios[r] {
 		return service.TaskErrorWrapperLocal(
 			fmt.Errorf("model %s does not support ratio %s; supported: %s",
-				info.OriginModelName, r, sortedKeys(c1.Ratios)),
+				origin, r, sortedKeys(c1.Ratios)),
 			"invalid_request", http.StatusBadRequest)
 	}
 
@@ -437,13 +500,13 @@ func (a *TaskAdaptor) ValidateRequestAndSetAction(c *gin.Context, info *relaycom
 		if len(mats.Videos) > 0 || len(mats.Audios) > 0 {
 			return service.TaskErrorWrapperLocal(
 				fmt.Errorf("model %s does not accept reference video/audio; use a model that supports multi-material reference",
-					info.OriginModelName),
+					origin),
 				"invalid_request", http.StatusBadRequest)
 		}
 		if len(mats.Images) > 2 {
 			return service.TaskErrorWrapperLocal(
 				fmt.Errorf("model %s accepts at most 2 reference images (first/last frame); use a model that supports multi-material reference",
-					info.OriginModelName),
+					origin),
 				"invalid_request", http.StatusBadRequest)
 		}
 	}
