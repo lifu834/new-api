@@ -33,6 +33,7 @@ import (
 	taskadobe2api "github.com/QuantumNous/new-api/relay/channel/task/adobe2api"
 	taskali "github.com/QuantumNous/new-api/relay/channel/task/ali"
 	taskchatgpt2api "github.com/QuantumNous/new-api/relay/channel/task/chatgpt2api"
+	taskdimensio "github.com/QuantumNous/new-api/relay/channel/task/dimensio"
 	taskdoubao "github.com/QuantumNous/new-api/relay/channel/task/doubao"
 	taskGemini "github.com/QuantumNous/new-api/relay/channel/task/gemini"
 	"github.com/QuantumNous/new-api/relay/channel/task/hailuo"
@@ -171,6 +172,8 @@ func GetTaskAdaptor(platform constant.TaskPlatform) channel.TaskAdaptor {
 			return &taskmeaicc.TaskAdaptor{}
 		case constant.ChannelTypeSecureSkillVideo:
 			return &tasksecureskill.TaskAdaptor{}
+		case constant.ChannelTypeDimensioVideo:
+			return &taskdimensio.TaskAdaptor{}
 		}
 	}
 	return nil

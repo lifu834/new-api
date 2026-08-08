@@ -59,6 +59,7 @@ const (
 	ChannelTypeAdobe2ApiVideo   = 59
 	ChannelTypeMeaiccVideo      = 60
 	ChannelTypeSecureSkillVideo = 61
+	ChannelTypeDimensioVideo    = 62
 	ChannelTypeDummy            // this one is only for count, do not add any channel after this
 
 )
@@ -126,6 +127,7 @@ var ChannelBaseURLs = []string{
 	"http://127.0.0.1:6001",                     //59 adobe2api-video (placeholder; configure per-channel)
 	"https://api.meaicc.com",                    //60 meaicc-video
 	"https://token.secure-skill.com",            //61 secure-skill-video
+	"https://jimeng.dimensio.cn",                //62 dimensio-video
 }
 
 var ChannelTypeNames = map[int]string{
@@ -187,6 +189,7 @@ var ChannelTypeNames = map[int]string{
 	ChannelTypeAdobe2ApiVideo:   "Adobe2ApiVideo",
 	ChannelTypeMeaiccVideo:      "MeaiccVideo",
 	ChannelTypeSecureSkillVideo: "SecureSkillVideo",
+	ChannelTypeDimensioVideo:    "DimensioVideo",
 }
 
 func GetChannelTypeName(channelType int) string {
