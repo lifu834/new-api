@@ -300,6 +300,42 @@ func TestConvertToOpenAIVideoScrubsUpstream(t *testing.T) {
 	}
 }
 
+// TestConvertToOpenAIVideoScrubsCamelCase 守住 260808 实测发现的泄露：
+// 上游同一批字段在提交/查询两条链路上分别用 snake_case 和 camelCase，
+// 只删 snake_case 时查询响应会把 `creditsConsumed`（我们的**进货成本**）
+// 原样返给客户，据此可直接算出毛利。
+func TestConvertToOpenAIVideoScrubsCamelCase(t *testing.T) {
+	a := &TaskAdaptor{}
+	task := &model.Task{
+		TaskID: "task_public_3",
+		Data: []byte(`{"task_id":"c1m","status":"completed","progress":100,
+		  "result":{"url":"https://storage.googleapis.com/davinciweb-x/a.mp4"},
+		  "creditsConsumed":208,"creditsReserved":260,
+		  "requestedModel":"hgf-seedance-2.0","effectiveModel":"dvc-seedance-2.0",
+		  "upstreamTaskId":"up_123","jobId":"job_9","recordSource":"api"}`),
+	}
+	task.Properties.OriginModelName = "sd-2.0-720p"
+
+	out, err := a.ConvertToOpenAIVideo(task)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	for _, p := range []string{
+		"creditsConsumed", "creditsReserved", "requestedModel", "effectiveModel",
+		"upstreamTaskId", "jobId", "recordSource",
+	} {
+		if gjson.GetBytes(out, p).Exists() {
+			t.Errorf("%s 未被清除——泄露上游身份或我方成本", p)
+		}
+	}
+	if got := gjson.GetBytes(out, "result.url").String(); contains(got, "googleapis") {
+		t.Errorf("成片直链未被代理化: %q", got)
+	}
+	if got := gjson.GetBytes(out, "model").String(); got != "sd-2.0-720p" {
+		t.Errorf("model = %q, want 对外名", got)
+	}
+}
+
 // TestConvertToOpenAIVideoSurfacesFriendlyFailure 失败时用户应看到翻译过的
 // 原因，而不是上游原始串。
 func TestConvertToOpenAIVideoSurfacesFriendlyFailure(t *testing.T) {

@@ -724,7 +724,14 @@ func (a *TaskAdaptor) ConvertToOpenAIVideo(task *model.Task) ([]byte, error) {
 
 	// requested_model / effective_model 会泄露上游 provider 代号（dvc/rlm/pxv…），
 	// 一律抹掉；model 还原成用户请求的对外名。
-	for _, path := range []string{"requested_model", "effective_model", "credits_consumed"} {
+	// ⚠️ 同一批字段上游有 snake_case 与 camelCase 两种写法（提交/查询两条链路不一致），
+	// 必须都删。260808 实测只删了 snake_case，结果查询响应里 `creditsConsumed: 208`
+	// 原样返给了客户——那是**我们的进货成本**，据此能直接算出毛利。
+	for _, path := range []string{
+		"requested_model", "effective_model", "credits_consumed",
+		"requestedModel", "effectiveModel", "creditsConsumed", "creditsReserved",
+		"upstreamTaskId", "jobId", "recordSource", "failureType",
+	} {
 		if gjson.GetBytes(data, path).Exists() {
 			if data, err = sjson.DeleteBytes(data, path); err != nil {
 				return nil, errors.Wrapf(err, "delete %s failed", path)
