@@ -2,7 +2,10 @@ package sudashui
 
 import (
 	"github.com/QuantumNous/new-api/common"
+	"io"
+	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/QuantumNous/new-api/model"
@@ -62,6 +65,75 @@ func TestParseTaskResultWrapped(t *testing.T) {
 	}
 	if !contains(info.Reason, "不接受含人脸") || !contains(info.Reason, "费用已退还") {
 		t.Errorf("Reason = %q，应翻译成换档位建议并注明退款", info.Reason)
+	}
+}
+
+// TestNormalizeFetchResponseAvoidsSelfFormat 守住"上游也是 new-api"的坑：
+//
+// service/task_polling.go 会先试着按自家 dto.TaskResponse 解析，只要顶层
+// code=="success" 就认定是自家格式，于是**完全跳过 adaptor.ParseTaskResult**，
+// 改用 t.GetResultURL() 取 private_data.result_url —— 那是我方内部字段，上游
+// 不会返回 ⇒ URL 为空 ⇒ ResultURL 退化成我们自己的代理地址 ⇒ /content 取自己
+// ⇒ 永久 502。所以必须把顶层 code 改名，让流程回落到本适配器的解析器。
+func TestNormalizeFetchResponseAvoidsSelfFormat(t *testing.T) {
+	raw := `{"code":"success","message":"","data":{"task_id":"t","status":"SUCCESS",
+	         "data":{"creations":[{"url":"https://files.sudashuiapi.com/x.mp4"}]}}}`
+	resp := &http.Response{Body: io.NopCloser(strings.NewReader(raw))}
+
+	out := normalizeFetchResponse(resp)
+	body, err := io.ReadAll(out.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := gjson.GetBytes(body, "code").String(); got == "success" {
+		t.Error("顶层 code 仍是 success —— 会被误判为我方自家格式，跳过本适配器解析")
+	}
+	// 其余内容必须原样保留，ParseTaskResult 依赖 data.*
+	if got := gjson.GetBytes(body, "data.status").String(); got != "SUCCESS" {
+		t.Errorf("data.status 被破坏: %q", got)
+	}
+	if got := gjson.GetBytes(body, "data.data.creations.0.url").String(); got == "" {
+		t.Error("成片地址被破坏")
+	}
+
+	// 改名后本适配器应能正常解析出成功与 URL
+	a := &TaskAdaptor{}
+	info, err := a.ParseTaskResult(body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Status != model.TaskStatusSuccess || info.Url == "" {
+		t.Errorf("解析结果 = %v %q, want success + url", info.Status, info.Url)
+	}
+}
+
+// TestSuccessWithoutURLStaysInProgress 守住实测踩到的时序坑：
+// 上游 state 先翻 success、creations 稍后才填。若此刻就报成功且不带 URL，
+// task_polling 会把 ResultURL 退化成我们自己的代理地址，而它只在 SUCCESS
+// 那一次写入 —— 代理随后去取自己，永久 502（成片其实是好的，只是取不到）。
+func TestSuccessWithoutURLStaysInProgress(t *testing.T) {
+	a := &TaskAdaptor{}
+
+	// creations 还没填
+	raw := `{"code":"success","data":{"task_id":"t","status":"SUCCESS",
+	          "data":{"state":"success","creations":[]}}}`
+	info, err := a.ParseTaskResult([]byte(raw))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if info.Status == model.TaskStatusSuccess {
+		t.Error("没有成片地址时不应报成功——会导致 ResultURL 永久指向我们自己")
+	}
+	if info.Status != model.TaskStatusInProgress {
+		t.Errorf("status = %v, want in-progress（继续轮询）", info.Status)
+	}
+
+	// creations 有但 url 是空串，同样不算成功
+	raw2 := `{"code":"success","data":{"status":"SUCCESS",
+	          "data":{"creations":[{"id":"x","url":""}]}}}`
+	info2, _ := a.ParseTaskResult([]byte(raw2))
+	if info2.Status == model.TaskStatusSuccess {
+		t.Error("url 为空串时同样不应报成功")
 	}
 }
 
@@ -169,15 +241,21 @@ func TestResolutionFromModelName(t *testing.T) {
 	}
 }
 
-// TestConvertToOpenAIVideoScrubs 成片直链、上游任务号、渠道号、我方进货成本
-// (quota) 都不能外泄。
-func TestConvertToOpenAIVideoScrubs(t *testing.T) {
+// TestConvertToOpenAIVideoFlatShape 上游本身是个 new-api，查询响应带着它的整套
+// 内部结构。必须**重新构造**扁平响应而不是打补丁，否则：
+//   - 泄露上游身份与我方成本（channel_id / quota / properties.upstream_model_name）
+//   - 响应形状与 dimensio / mai 不一致，海外组的"统一"就只统一了请求
+func TestConvertToOpenAIVideoFlatShape(t *testing.T) {
 	a := &TaskAdaptor{}
 	task := &model.Task{
-		TaskID: "task_public_1",
+		TaskID:   "task_public_1",
+		Status:   model.TaskStatusSuccess,
+		Progress: "100%",
 		Data: []byte(`{"code":"success","data":{
+		  "action":"textGenerate","id":690033,
 		  "task_id":"task_upstream","channel_id":27,"quota":1656000,"platform":"52",
 		  "status":"SUCCESS",
+		  "properties":{"upstream_model_name":"sdas-gf3-seedance-2.0-720p"},
 		  "data":{"creations":[{"url":"https://files.sudashuiapi.com/proxy/outputs/x.mp4"}]}}}`),
 	}
 	task.Properties.OriginModelName = "sd-2.0-720p"
@@ -186,15 +264,39 @@ func TestConvertToOpenAIVideoScrubs(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if got := gjson.GetBytes(out, "data.data.creations.0.url").String(); contains(got, "sudashuiapi.com") {
-		t.Errorf("成片直链未被代理化: %q", got)
-	}
-	for _, p := range []string{"data.task_id", "data.channel_id", "data.quota", "data.platform"} {
+	// 上游内部结构一律不得出现
+	for _, p := range []string{"code", "data", "data.channel_id", "data.quota",
+		"data.properties.upstream_model_name", "action", "platform"} {
 		if gjson.GetBytes(out, p).Exists() {
-			t.Errorf("%s 泄露上游信息/我方成本，应删除", p)
+			t.Errorf("%s 不应出现在对外响应里（泄露上游/我方成本）", p)
 		}
+	}
+	if got := gjson.GetBytes(out, "video_url").String(); contains(got, "sudashuiapi.com") || got == "" {
+		t.Errorf("video_url = %q, 应为本站代理地址", got)
+	}
+	// object 是类型标记不是 URL（meaicc 才把成片放 object，别搞混）
+	if got := gjson.GetBytes(out, "object").String(); got != "video" {
+		t.Errorf("object = %q, want \"video\"", got)
+	}
+	if got := gjson.GetBytes(out, "status").String(); got != "completed" {
+		t.Errorf("status = %q, want completed", got)
 	}
 	if got := gjson.GetBytes(out, "model").String(); got != "sd-2.0-720p" {
 		t.Errorf("model = %q, want 对外名", got)
+	}
+	if got := gjson.GetBytes(out, "task_id").String(); got != "task_public_1" {
+		t.Errorf("task_id = %q, want public id", got)
+	}
+
+	// 失败时给出可读原因，且不带成片地址
+	fail := &model.Task{TaskID: "t2", Status: model.TaskStatusFailure,
+		FailReason: "该档位不接受含人脸的参考图，费用已退还。请改用支持真人的档位",
+		Data:       []byte(`{"code":"success","data":{"status":"FAILURE"}}`)}
+	out2, _ := a.ConvertToOpenAIVideo(fail)
+	if got := gjson.GetBytes(out2, "error.message").String(); !contains(got, "不接受含人脸") {
+		t.Errorf("error.message = %q", got)
+	}
+	if gjson.GetBytes(out2, "video_url").Exists() {
+		t.Error("失败任务不应带 video_url")
 	}
 }

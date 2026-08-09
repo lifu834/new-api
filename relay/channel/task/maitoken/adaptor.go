@@ -531,7 +531,10 @@ func (a *TaskAdaptor) ConvertToOpenAIVideo(task *model.Task) ([]byte, error) {
 
 	// 成片直链是 cdn.mai-token.com/*，会暴露上游身份——换成本站代理地址
 	proxyURL := taskcommon.BuildProxyURL(task.TaskID)
-	for _, path := range []string{"video_url", "url", "object", "metadata.url", "metadata.video_url"} {
+	// ⚠️ 不要把 "object" 放进来：它在 mai/OpenAI 语义里是**类型标记**（值为
+	// "video"），只有 meaicc 才把成片 URL 放在 object。沿用 meaicc 的改写列表
+	// 会把 object 覆盖成代理地址，客户端据此判断类型就全乱了（260808 实测踩到）。
+	for _, path := range []string{"video_url", "url", "metadata.url", "metadata.video_url"} {
 		if gjson.GetBytes(data, path).Exists() {
 			if data, err = sjson.SetBytes(data, path, proxyURL); err != nil {
 				return nil, errors.Wrapf(err, "set %s failed", path)

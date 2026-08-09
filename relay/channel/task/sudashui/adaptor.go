@@ -505,7 +505,39 @@ func (a *TaskAdaptor) FetchTask(baseUrl, key string, body map[string]any, proxy 
 	if err != nil {
 		return nil, fmt.Errorf("new proxy http client failed: %w", err)
 	}
-	return client.Do(req)
+	resp, err := client.Do(req)
+	if err != nil || resp == nil {
+		return resp, err
+	}
+	return normalizeFetchResponse(resp), nil
+}
+
+// normalizeFetchResponse 把上游响应的顶层 `code` 改名，使其**不被误认为我方自家格式**。
+//
+// 🔑 这是"上游也是 new-api"才有的坑（260809 实测）：
+// service/task_polling.go 会先尝试 dto.TaskResponse[model.Task] 解析，只要顶层
+// code == "success" 就认定是自家格式，于是 **完全跳过 adaptor.ParseTaskResult**，
+// 转而用 t.GetResultURL() 取 private_data.result_url —— 那是我方内部字段，上游
+// 当然不会返回，于是 URL 为空，ResultURL 退化成我们自己的代理地址，
+// /content 去取自己 → 永久 502（成片其实是好的，只是取不到）。
+//
+// 改名后判定失败，流程会 fallback 到本适配器的 ParseTaskResult，一切正常。
+// 只动顶层 code 这一个键，其余原样保留，ParseTaskResult 读的是 data.* 不受影响。
+func normalizeFetchResponse(resp *http.Response) *http.Response {
+	body, err := io.ReadAll(resp.Body)
+	_ = resp.Body.Close()
+	if err != nil {
+		resp.Body = io.NopCloser(bytes.NewReader(nil))
+		return resp
+	}
+	if gjson.GetBytes(body, "code").String() == "success" {
+		if patched, err := sjson.SetBytes(body, "code", "sudashui_success"); err == nil {
+			body = patched
+		}
+	}
+	resp.Body = io.NopCloser(bytes.NewReader(body))
+	resp.ContentLength = int64(len(body))
+	return resp
 }
 
 func (a *TaskAdaptor) ParseTaskResult(respBody []byte) (*relaycommon.TaskInfo, error) {
@@ -519,10 +551,17 @@ func (a *TaskAdaptor) ParseTaskResult(respBody []byte) (*relaycommon.TaskInfo, e
 
 	switch strings.ToUpper(strings.TrimSpace(d.Status)) {
 	case "SUCCESS", "SUCCEEDED", "COMPLETED":
-		info.Status = model.TaskStatusSuccess
-		if len(d.Data.Creations) > 0 {
-			info.Url = d.Data.Creations[0].URL
+		// 🔑 上游存在**时序窗口**：state 先翻成 success，creations 稍后才填上。
+		// 若在这一瞬就报成功且不带 URL，task_polling 会把 ResultURL 退化成我们
+		// 自己的代理地址（service/task_polling.go 的 else 分支），而 ResultURL
+		// 只在 SUCCESS 那一次写入 —— 代理随后去取自己，永久 502。
+		// 所以拿不到成片地址就**不算成功**，继续轮询。
+		if len(d.Data.Creations) == 0 || strings.TrimSpace(d.Data.Creations[0].URL) == "" {
+			info.Status = model.TaskStatusInProgress
+			break
 		}
+		info.Status = model.TaskStatusSuccess
+		info.Url = d.Data.Creations[0].URL
 	case "FAILURE", "FAILED", "CANCELLED":
 		info.Status = model.TaskStatusFailure
 		info.Reason = friendlyReason(d.Data.ErrCode, firstNonEmpty(
@@ -552,48 +591,55 @@ func firstNonEmpty(ss ...string) string {
 // 对外响应改写
 // ============================
 
+// ConvertToOpenAIVideo **重新构造**一个扁平响应，而不是在上游报文上打补丁。
+//
+// 🔑 上游本身也是个 new-api，它的查询响应是
+// {code, data:{action, id, channel_id, quota, properties:{upstream_model_name}, data:{…}}}
+// —— 整套内部结构。若沿用"改几个字段再原样返回"的做法（本适配器初版就是），
+// 客户会拿到：
+//   - 上游的内部字段（action / channel_id / properties.upstream_model_name…），既
+//     泄露上游身份，也让人能算出我方成本（quota）；
+//   - 与 dimensio / mai 完全不同的响应形状 —— 海外组承诺的"统一"就只统一了请求，
+//     没统一响应，客户在主备切换时要写两套解析。
+//
+// 所以这里只输出白名单字段，形状与 dimensio / mai 对齐。
 func (a *TaskAdaptor) ConvertToOpenAIVideo(task *model.Task) ([]byte, error) {
-	data := task.Data
-	var err error
-	if data, err = sjson.SetBytes(data, "id", task.TaskID); err != nil {
-		return nil, errors.Wrap(err, "set id failed")
-	}
-	if data, err = sjson.SetBytes(data, "task_id", task.TaskID); err != nil {
-		return nil, errors.Wrap(err, "set task_id failed")
+	status := "queued"
+	switch task.Status {
+	case model.TaskStatusSuccess:
+		status = "completed"
+	case model.TaskStatusFailure:
+		status = "failed"
+	case model.TaskStatusInProgress:
+		status = "processing"
 	}
 
-	// 成片直链是 files.sudashuiapi.com/*，会暴露上游身份——换成本站代理地址。
-	proxyURL := taskcommon.BuildProxyURL(task.TaskID)
-	for _, p := range []string{"url", "video_url", "object",
-		"data.data.creations.0.url", "data.data.creations.0.cover_url"} {
-		if gjson.GetBytes(data, p).Exists() {
-			if data, err = sjson.SetBytes(data, p, proxyURL); err != nil {
-				return nil, errors.Wrapf(err, "set %s failed", p)
-			}
-		}
+	out := map[string]any{
+		"id":      task.TaskID,
+		"task_id": task.TaskID,
+		"object":  "video", // 类型标记，不是 URL
+		"model":   task.Properties.OriginModelName,
+		"status":  status,
 	}
-	// 上游任务号、渠道号、我方进货成本(quota)一律不外泄
-	for _, p := range []string{"data.task_id", "data.channel_id", "data.quota",
-		"data.platform", "data.user_id", "data.group", "data.data.payload",
-		"properties.upstream_model_name"} {
-		if gjson.GetBytes(data, p).Exists() {
-			if data, err = sjson.DeleteBytes(data, p); err != nil {
-				return nil, errors.Wrapf(err, "delete %s failed", p)
-			}
-		}
+	if p := strings.TrimSpace(task.Progress); p != "" {
+		out["progress"] = p
 	}
-	if origin := task.Properties.OriginModelName; origin != "" {
-		if data, err = sjson.SetBytes(data, "model", origin); err != nil {
-			return nil, errors.Wrap(err, "set model failed")
-		}
+	if task.Status == model.TaskStatusSuccess {
+		// 成片直链是 files.sudashuiapi.com/*，换成本站代理地址
+		out["video_url"] = taskcommon.BuildProxyURL(task.TaskID)
 	}
-	if task.Status == model.TaskStatusFailure && task.FailReason != "" {
-		if data, err = sjson.SetBytes(data, "status", "FAILED: "+task.FailReason); err != nil {
-			return nil, errors.Wrap(err, "set status failed")
+	if task.Status == model.TaskStatusFailure {
+		reason := task.FailReason
+		if reason == "" {
+			reason = "任务失败，费用已退还"
 		}
-		if data, err = sjson.SetBytes(data, "error.message", task.FailReason); err != nil {
-			return nil, errors.Wrap(err, "set error.message failed")
-		}
+		out["status"] = "failed"
+		out["error"] = map[string]any{"code": "generation_failed", "message": reason}
+	}
+
+	data, err := common.Marshal(out)
+	if err != nil {
+		return nil, errors.Wrap(err, "marshal video response failed")
 	}
 	return data, nil
 }
