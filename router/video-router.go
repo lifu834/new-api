@@ -16,6 +16,26 @@ func SetVideoRouter(router *gin.Engine) {
 		videoProxyRouter.GET("/videos/:task_id/content", controller.VideoProxy)
 	}
 
+	// 素材库：客户上传参考素材，拿到一个**公网可取**的地址再喂给视频接口。
+	//
+	// 取件端点 /v1/assets/:asset_id/content 必须**匿名**——上游服务器要直接
+	// 拉取，没法带我们的鉴权。它的访问屏障是不可枚举的 192bit 随机 ID，
+	// 因此绝不能提供任何目录列表或可枚举的路径。
+	assetPublicRouter := router.Group("/v1")
+	assetPublicRouter.Use(middleware.RouteTag("relay"))
+	{
+		assetPublicRouter.GET("/assets/:asset_id/content", controller.AssetContent)
+	}
+
+	assetRouter := router.Group("/v1")
+	assetRouter.Use(middleware.RouteTag("relay"))
+	assetRouter.Use(middleware.TokenOrUserAuth())
+	{
+		assetRouter.POST("/assets", controller.UploadAsset)
+		assetRouter.GET("/assets", controller.ListAssets)
+		assetRouter.DELETE("/assets/:asset_id", controller.DeleteAsset)
+	}
+
 	videoV1Router := router.Group("/v1")
 	videoV1Router.Use(middleware.RouteTag("relay"))
 	videoV1Router.Use(middleware.TokenAuth(), middleware.Distribute())
