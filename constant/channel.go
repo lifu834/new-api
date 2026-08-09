@@ -61,6 +61,7 @@ const (
 	ChannelTypeSecureSkillVideo = 61
 	ChannelTypeDimensioVideo    = 62
 	ChannelTypeMaiTokenVideo    = 63
+	ChannelTypeSudashuiVideo    = 64
 	ChannelTypeDummy            // this one is only for count, do not add any channel after this
 
 )
@@ -130,6 +131,7 @@ var ChannelBaseURLs = []string{
 	"https://token.secure-skill.com",            //61 secure-skill-video
 	"https://jimeng.dimensio.cn",                //62 dimensio-video
 	"https://api.mai-token.com",                 //63 mai-token-video
+	"https://api.sudashuiapi.com",               //64 sudashui-video
 }
 
 var ChannelTypeNames = map[int]string{
@@ -193,6 +195,7 @@ var ChannelTypeNames = map[int]string{
 	ChannelTypeSecureSkillVideo: "SecureSkillVideo",
 	ChannelTypeDimensioVideo:    "DimensioVideo",
 	ChannelTypeMaiTokenVideo:    "MaiTokenVideo",
+	ChannelTypeSudashuiVideo:    "SudashuiVideo",
 }
 
 func GetChannelTypeName(channelType int) string {

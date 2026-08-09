@@ -43,6 +43,7 @@ import (
 	taskmeaicc "github.com/QuantumNous/new-api/relay/channel/task/meaicc"
 	tasksecureskill "github.com/QuantumNous/new-api/relay/channel/task/secureskill"
 	tasksora "github.com/QuantumNous/new-api/relay/channel/task/sora"
+	tasksudashui "github.com/QuantumNous/new-api/relay/channel/task/sudashui"
 	"github.com/QuantumNous/new-api/relay/channel/task/suno"
 	taskvertex "github.com/QuantumNous/new-api/relay/channel/task/vertex"
 	taskVidu "github.com/QuantumNous/new-api/relay/channel/task/vidu"
@@ -177,6 +178,8 @@ func GetTaskAdaptor(platform constant.TaskPlatform) channel.TaskAdaptor {
 			return &taskdimensio.TaskAdaptor{}
 		case constant.ChannelTypeMaiTokenVideo:
 			return &taskmaitoken.TaskAdaptor{}
+		case constant.ChannelTypeSudashuiVideo:
+			return &tasksudashui.TaskAdaptor{}
 		}
 	}
 	return nil
