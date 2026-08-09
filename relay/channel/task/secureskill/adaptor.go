@@ -89,11 +89,16 @@ func (a *TaskAdaptor) ValidateRequestAndSetAction(c *gin.Context, info *relaycom
 	media := collectMediaURLs(c, &req)
 	// 该上游的 files 字段**强制必填**（不传/传空串均报 "files is required"），
 	// 即它只做图生视频/参考生视频，**不支持纯文生**。这里提前拦下，避免纯文生请求
-	// 一路打到上游才拿到看不懂的报错；同时 LocalError 会中止后续重试（重试也没用）。
+	// 一路打到上游才拿到看不懂的报错。
+	//
+	// 🔑 用**可重试**错误而不是 LocalError：本渠道现在与 meaicc / sudashui 同挂在
+	// seedance-2.0 这一个对外名下，而那两家都支持纯文生。若在这里返回 LocalError，
+	// 会中止整条重试链 —— 客户的纯文生请求一旦轮到本渠道就彻底失败，哪怕别的
+	// 渠道完全可用。"重试没意义"只在单渠道时成立，多渠道下必须让它落到下一家。
 	if len(media) == 0 {
-		return service.TaskErrorWrapperLocal(
+		return service.TaskErrorWrapper(
 			errors.New("this model requires at least one reference material (image/video/audio); "+
-				"for text-to-video use the per-second video models"),
+				"text-to-video is served by other channels"),
 			"invalid_request", http.StatusBadRequest)
 	}
 	for _, u := range media {
