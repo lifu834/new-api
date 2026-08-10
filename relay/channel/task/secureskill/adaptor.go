@@ -59,6 +59,23 @@ func (a *TaskAdaptor) Init(info *relaycommon.RelayInfo) {
 func (a *TaskAdaptor) GetModelList() []string { return ModelList }
 func (a *TaskAdaptor) GetChannelName() string { return ChannelName }
 
+// EstimateBilling 提供按秒计费的时长乘数。
+//
+// 🔑 **必须实现，不能沿用 BaseBilling**（它返回 nil）：本上游是**按秒**计价
+// （实测 10 秒扣 ¥6.00，即 ¥0.60/秒）。它最初挂在按次的对外名下，缺乘数不影响；
+// 但一旦挂到按秒的对外名（海外组 sd-2.0-720p ¥0.88/秒）上，没有乘数就变成
+// **按 1 秒收费**——4 秒成本 ¥2.40、我们只收 ¥0.88，每单倒贴。
+//
+// 教训：**上游的计价模式决定它能挂在哪种对外名下**；换组时必须同时检查
+// EstimateBilling，否则亏损是静默的。
+func (a *TaskAdaptor) EstimateBilling(c *gin.Context, info *relaycommon.RelayInfo) map[string]float64 {
+	req, err := relaycommon.GetTaskRequest(c)
+	if err != nil {
+		return nil
+	}
+	return map[string]float64{"seconds": float64(resolveDuration(&req))}
+}
+
 func resolveDuration(req *relaycommon.TaskSubmitReq) int {
 	if req.Duration > 0 {
 		return req.Duration

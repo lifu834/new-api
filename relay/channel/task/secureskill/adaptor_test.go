@@ -1,6 +1,10 @@
 package secureskill
 
 import (
+	"net/http/httptest"
+
+	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	"github.com/gin-gonic/gin"
 	"strings"
 	"testing"
 
@@ -106,6 +110,36 @@ func TestConvertToOpenAIVideoSynthesizes(t *testing.T) {
 	for _, leak := range []string{"video-2.0-pro", "secure-skill"} {
 		if strings.Contains(s, leak) {
 			t.Errorf("泄露上游信息 %q: %s", leak, s)
+		}
+	}
+}
+
+// TestEstimateBillingSeconds 守住"换组即亏损"这类静默错误。
+//
+// 本上游**按秒**计价（实测 10 秒扣 ¥6.00 = ¥0.60/秒）。它最初挂在按次的对外名
+// 下，沿用 BaseBilling（返回 nil，无乘数）没问题；但一旦挂到按秒的对外名
+// （海外组 sd-2.0-720p ¥0.88/秒）上，缺乘数就变成**按 1 秒收费** ——
+// 4 秒成本 ¥2.40、我们只收 ¥0.88，每单倒贴，且完全没有报错。
+func TestEstimateBillingSeconds(t *testing.T) {
+	a := &TaskAdaptor{}
+	cases := []struct {
+		req  relaycommon.TaskSubmitReq
+		want float64
+	}{
+		{relaycommon.TaskSubmitReq{Duration: 4}, 4},
+		{relaycommon.TaskSubmitReq{Duration: 15}, 15},
+		{relaycommon.TaskSubmitReq{Seconds: "10"}, 10},
+	}
+	for _, tc := range cases {
+		c, _ := gin.CreateTestContext(httptest.NewRecorder())
+		c.Set("task_request", tc.req)
+		got := a.EstimateBilling(c, &relaycommon.RelayInfo{})
+		if got == nil {
+			t.Fatal("EstimateBilling 返回 nil —— 挂到按秒对外名下会按 1 秒收费，每单倒贴")
+		}
+		if got["seconds"] != tc.want {
+			t.Errorf("duration=%d seconds=%q => %v, want %v",
+				tc.req.Duration, tc.req.Seconds, got["seconds"], tc.want)
 		}
 	}
 }
