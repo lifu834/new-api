@@ -1,5 +1,7 @@
 package maitoken
 
+import "strings"
+
 // ModelList 是 mai-token（api.mai-token.com）的公开模型名。
 //
 // 🔑 **输出分辨率由模型名决定**，不由 resolution 参数决定（官方文档明示：
@@ -23,6 +25,23 @@ var ModelList = []string{
 }
 
 var ChannelName = "mai-token-video"
+
+// fixedDurationModels 是**不接受任何时长参数**的模型。
+//
+// 🔑 260810 实测：`Hailuo-H3` 传 seconds=3/5/6/10 与 duration=6 一律被拒
+// （"seconds 参数取值不受支持"），**完全不传才成功**，输出固定约 5 秒 2560x1440。
+// 这类模型必须在请求体里省掉 seconds，否则 100% 失败。
+//
+// 它们也一定是**按次**计费（实测日志写明"操作 textGenerate，按次计费"，
+// 预扣 ¥2.50/条），所以对外名要同时加进 TASK_PRICE_PATCH，避免被乘以时长。
+var fixedDurationModels = map[string]bool{
+	"Hailuo-H3": true,
+}
+
+// IsFixedDuration 判断该上游模型是否固定时长。
+func IsFixedDuration(upstreamModel string) bool {
+	return fixedDurationModels[strings.TrimSpace(upstreamModel)]
+}
 
 // 上游硬约束（官方文档 §5.4 / §18）
 const (

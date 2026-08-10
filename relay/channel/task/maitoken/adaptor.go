@@ -25,6 +25,7 @@ import (
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/relay/channel"
@@ -35,7 +36,6 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/pkg/errors"
 	"github.com/tidwall/gjson"
-	"github.com/tidwall/sjson"
 )
 
 // ============================
@@ -61,8 +61,10 @@ type upstreamRequest struct {
 	Model   string        `json:"model"`
 	Prompt  string        `json:"prompt"` // 顶层 prompt 必填，接口据此校验
 	Content []contentItem `json:"content"`
-	Seconds string        `json:"seconds"` // 必须是字符串 "4"~"15"
-	Ratio   string        `json:"ratio,omitempty"`
+	// Seconds 必须是字符串 "4"~"15"。用 omitempty 是为了支持**固定时长模型**
+	// （如 Hailuo-H3）：它们传任何时长参数都会被拒，必须整个字段不出现。
+	Seconds string `json:"seconds,omitempty"`
+	Ratio   string `json:"ratio,omitempty"`
 	// 注意：**不发 resolution**。档位由模型名决定，同时传会冲突（文档 §17.4）。
 }
 
@@ -127,6 +129,37 @@ func resolveDuration(req *relaycommon.TaskSubmitReq) int {
 		}
 	}
 	return 5
+}
+
+// upstreamModelOf 解析真正会发给上游的模型名。
+//
+// 🔑 ValidateRequestAndSetAction 在 ModelMappedHelper **之前**执行
+// （relay_task.go 步骤 1 vs 2.5），此时 info.UpstreamModelName 还是对外名。
+// 直接拿它判断"是不是固定时长模型"会永远判错。这里复用与 ModelMappedHelper
+// 相同的数据源自行解析一次（含链式重定向与防环）。
+func upstreamModelOf(c *gin.Context, req *relaycommon.TaskSubmitReq, info *relaycommon.RelayInfo) string {
+	origin := strings.TrimSpace(info.OriginModelName)
+	if origin == "" {
+		origin = strings.TrimSpace(req.Model)
+	}
+	mapping := c.GetString("model_mapping")
+	if mapping == "" || mapping == "{}" {
+		return origin
+	}
+	m := map[string]string{}
+	if err := common.UnmarshalJsonStr(mapping, &m); err != nil {
+		return origin
+	}
+	cur := origin
+	seen := map[string]bool{cur: true}
+	for {
+		next, ok := m[cur]
+		if !ok || next == "" || seen[next] {
+			return cur
+		}
+		seen[next] = true
+		cur = next
+	}
 }
 
 // resolutionFromModelName 从对外模型名的档位后缀推断分辨率。
@@ -287,8 +320,10 @@ func (a *TaskAdaptor) ValidateRequestAndSetAction(c *gin.Context, info *relaycom
 			"invalid_request", http.StatusBadRequest)
 	}
 
+	// 固定时长模型不接受任何时长参数，自然也不该用时长范围去卡它——
+	// 否则客户按默认值（5 秒）提交反而会被我们自己拦下。
 	d := resolveDuration(&req)
-	if d < minDuration || d > maxDuration {
+	if !IsFixedDuration(upstreamModelOf(c, &req, info)) && (d < minDuration || d > maxDuration) {
 		return service.TaskErrorWrapperLocal(
 			fmt.Errorf("duration must be between %d and %d seconds", minDuration, maxDuration),
 			"invalid_request", http.StatusBadRequest)
@@ -356,8 +391,33 @@ func (a *TaskAdaptor) ValidateRequestAndSetAction(c *gin.Context, info *relaycom
 			"invalid_request", http.StatusBadRequest)
 	}
 
+	// ⚠️ 只在管线没定过的时候才设：ResolveOriginTask 会在**进重试循环之前**
+	// 把 /v1/videos/:id/remix 标成 TaskActionRemix（relay_task.go:42），
+	// 而 Validate 在那之后才跑。无条件赋值会把 remix 覆盖成普通生成。
+	if info.Action == "" {
+		info.Action = actionOf(mats)
+	}
 	c.Set("task_request", req)
 	return nil
+}
+
+// actionOf 决定消费日志里的「操作」字段。
+//
+// 不设它的话 LogTaskConsumption 会写成 "操作 ，按次计费"（service/task_billing.go:21
+// 直接 fmt 拼 info.Action），后台一眼看不出这单是纯文生还是带素材的。
+// 这个区分很有用：同一个对外模型名在不同上游的素材支持度并不相同，
+// 出问题时得先知道客户当时到底传没传素材。
+func actionOf(mats materials) string {
+	switch {
+	case mats.FirstLast:
+		return constant.TaskActionFirstTailGenerate
+	case len(mats.Videos) > 0:
+		return constant.TaskActionRemix
+	case !mats.empty():
+		return constant.TaskActionReferenceGenerate
+	default:
+		return constant.TaskActionTextGenerate
+	}
 }
 
 // ============================
@@ -418,6 +478,10 @@ func (a *TaskAdaptor) BuildRequestBody(c *gin.Context, info *relaycommon.RelayIn
 		Content: buildContent(req.Prompt, mats),
 		Seconds: strconv.Itoa(resolveDuration(&req)),
 		Ratio:   strings.TrimSpace(ratioFromRequest(c, &req)),
+	}
+	// 固定时长模型（如 Hailuo-H3）传任何时长参数都会被上游拒，必须整个字段不出现。
+	if IsFixedDuration(info.UpstreamModelName) {
+		body.Seconds = ""
 	}
 
 	data, err := common.Marshal(body)
@@ -517,42 +581,61 @@ func (a *TaskAdaptor) ParseTaskResult(respBody []byte) (*relaycommon.TaskInfo, e
 // 对外响应改写
 // ============================
 
+// ConvertToOpenAIVideo 用**白名单重建**对外响应，而不是在上游原始 JSON 上
+// 逐个字段改写。
+//
+// 🔑 为什么必须白名单（260810 实测）：原先是黑名单式改写
+// （video_url/url/metadata.url 三个已知字段换成代理地址），结果 Hailuo-H3 的
+// 返回体里还有一个 **`result_url`** 也装着成片直链，直接把
+// `cdn.guoguomg.com/video-jobs/.../task_<上游ID>/video.mp4` 连同上游任务 ID
+// 一起漏给了客户 —— 等于把上游身份和绕过我们的路径一并奉送。
+// 黑名单永远落后于上游加字段的速度；白名单则是上游加什么都漏不出去。
+// （suda 适配器同样的坑，同样的解法。）
 func (a *TaskAdaptor) ConvertToOpenAIVideo(task *model.Task) ([]byte, error) {
-	data := task.Data
-	var err error
-	if data, err = sjson.SetBytes(data, "id", task.TaskID); err != nil {
-		return nil, errors.Wrap(err, "set id failed")
+	src := task.Data
+	// 成片直链会暴露上游身份——一律换成本站代理地址
+	proxyURL := taskcommon.BuildProxyURL(task.TaskID)
+
+	out := map[string]any{
+		"id":      task.TaskID,
+		"task_id": task.TaskID,
+		// ⚠️ object 在 mai/OpenAI 语义里是**类型标记**（值恒为 "video"），
+		// 不是成片 URL —— 只有 meaicc 才把 URL 放在 object。曾照抄 meaicc 的
+		// 改写列表把它覆盖成代理地址，客户端据此判断类型就全乱了（260808 踩到）。
+		"object": "video",
+		"model":  task.Properties.OriginModelName,
 	}
-	if gjson.GetBytes(data, "task_id").Exists() {
-		if data, err = sjson.SetBytes(data, "task_id", task.TaskID); err != nil {
-			return nil, errors.Wrap(err, "set task_id failed")
+	if out["model"] == "" {
+		out["model"] = gjson.GetBytes(src, "model").String()
+	}
+
+	// 原样透传的**标量**字段：只有明确属于我们对外契约的才进来
+	for _, k := range []string{"status", "progress", "created_at", "completed_at"} {
+		if v := gjson.GetBytes(src, k); v.Exists() {
+			out[k] = v.Value()
 		}
 	}
 
-	// 成片直链是 cdn.mai-token.com/*，会暴露上游身份——换成本站代理地址
-	proxyURL := taskcommon.BuildProxyURL(task.TaskID)
-	// ⚠️ 不要把 "object" 放进来：它在 mai/OpenAI 语义里是**类型标记**（值为
-	// "video"），只有 meaicc 才把成片 URL 放在 object。沿用 meaicc 的改写列表
-	// 会把 object 覆盖成代理地址，客户端据此判断类型就全乱了（260808 实测踩到）。
-	for _, path := range []string{"video_url", "url", "metadata.url", "metadata.video_url"} {
-		if gjson.GetBytes(data, path).Exists() {
-			if data, err = sjson.SetBytes(data, path, proxyURL); err != nil {
-				return nil, errors.Wrapf(err, "set %s failed", path)
-			}
-		}
+	// 成片地址：三种叫法都给（历史客户端各认一个），值统一是代理地址
+	if task.Status == model.TaskStatusSuccess {
+		out["video_url"] = proxyURL
+		out["url"] = proxyURL
+		out["metadata"] = map[string]any{"url": proxyURL}
 	}
-	if origin := task.Properties.OriginModelName; origin != "" {
-		if data, err = sjson.SetBytes(data, "model", origin); err != nil {
-			return nil, errors.Wrap(err, "set model failed")
-		}
-	}
+
 	if task.Status == model.TaskStatusFailure && task.FailReason != "" {
-		if data, err = sjson.SetBytes(data, "status", "FAILED: "+task.FailReason); err != nil {
-			return nil, errors.Wrap(err, "set status failed")
+		out["status"] = "FAILED: " + task.FailReason
+		out["error"] = map[string]any{"message": task.FailReason}
+	} else if e := gjson.GetBytes(src, "error"); e.Exists() && e.Type != gjson.Null {
+		// 上游给了 error 但任务没判失败：只透出翻译后的 message，不透原始 code
+		out["error"] = map[string]any{
+			"message": friendlyReason(e.Get("code").String(), e.Get("message").String()),
 		}
-		if data, err = sjson.SetBytes(data, "error.message", task.FailReason); err != nil {
-			return nil, errors.Wrap(err, "set error.message failed")
-		}
+	}
+
+	data, err := common.Marshal(out)
+	if err != nil {
+		return nil, errors.Wrap(err, "marshal video response failed")
 	}
 	return data, nil
 }

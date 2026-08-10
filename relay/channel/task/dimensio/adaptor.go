@@ -24,6 +24,7 @@ import (
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/relay/channel"
@@ -476,6 +477,12 @@ func (a *TaskAdaptor) ValidateRequestAndSetAction(c *gin.Context, info *relaycom
 	// 以下校验依赖目标上游模型的能力表；模型未知时放行（新模型不至于被误拦）
 	c1, known := capsFor(upstreamModelOf(c, origin))
 	if !known {
+		// ⚠️ 只在管线没定过的时候才设：ResolveOriginTask 会在**进重试循环之前**
+		// 把 /v1/videos/:id/remix 标成 TaskActionRemix（relay_task.go:42），
+		// 而 Validate 在那之后才跑。无条件赋值会把 remix 覆盖成普通生成。
+		if info.Action == "" {
+			info.Action = actionOf(mats)
+		}
 		c.Set("task_request", req)
 		return nil
 	}
@@ -511,8 +518,30 @@ func (a *TaskAdaptor) ValidateRequestAndSetAction(c *gin.Context, info *relaycom
 		}
 	}
 
+	// ⚠️ 只在管线没定过的时候才设：ResolveOriginTask 会在**进重试循环之前**
+	// 把 /v1/videos/:id/remix 标成 TaskActionRemix（relay_task.go:42），
+	// 而 Validate 在那之后才跑。无条件赋值会把 remix 覆盖成普通生成。
+	if info.Action == "" {
+		info.Action = actionOf(mats)
+	}
 	c.Set("task_request", req)
 	return nil
+}
+
+// actionOf 决定消费日志里的「操作」字段。不设它的话
+// service/task_billing.go 会写成 "操作 ，..."，后台看不出这单有没有带素材
+// —— 而同一个对外模型名在不同上游的素材支持度并不一样，排查时必须先知道这个。
+func actionOf(mats materials) string {
+	switch {
+	case mats.FirstLast:
+		return constant.TaskActionFirstTailGenerate
+	case len(mats.Videos) > 0:
+		return constant.TaskActionRemix
+	case !mats.empty():
+		return constant.TaskActionReferenceGenerate
+	default:
+		return constant.TaskActionTextGenerate
+	}
 }
 
 // ============================

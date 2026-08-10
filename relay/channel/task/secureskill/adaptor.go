@@ -22,6 +22,7 @@ import (
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/relay/channel"
@@ -124,6 +125,15 @@ func (a *TaskAdaptor) ValidateRequestAndSetAction(c *gin.Context, info *relaycom
 				errors.New("reference materials must be public http(s) URLs; base64 is not supported by this model"),
 				"invalid_request", http.StatusBadRequest)
 		}
+	}
+	// 本渠道 files 强制必填（见上），走到这里必然带了素材，
+	// 所以「操作」只可能是参考生成。不设它的话 service/task_billing.go
+	// 会把消费日志写成 "操作 ，..."。
+	// ⚠️ 只在管线没定过的时候才设：ResolveOriginTask 会在**进重试循环之前**
+	// 把 /v1/videos/:id/remix 标成 TaskActionRemix（relay_task.go:42），
+	// 而 Validate 在那之后才跑。无条件赋值会把 remix 覆盖成普通生成。
+	if info.Action == "" {
+		info.Action = constant.TaskActionReferenceGenerate
 	}
 	c.Set("task_request", req)
 	return nil
