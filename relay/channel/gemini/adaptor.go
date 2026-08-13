@@ -58,6 +58,25 @@ func (a *Adaptor) ConvertAudioRequest(c *gin.Context, info *relaycommon.RelayInf
 }
 
 func (a *Adaptor) ConvertImageRequest(c *gin.Context, info *relaycommon.RelayInfo, request dto.ImageRequest) (any, error) {
+	// Gemini 的原生生图模型（gemini-*-image*，即市面上的 nano-banana 系）不走 imagen 的
+	// :predict + instances/parameters 协议，而是走 :generateContent + contents —— 与聊天同构，
+	// 图片以 inlineData 回来。GetRequestURL 已按模型名选对了 action（只有 imagen 前缀用 :predict），
+	// 这里补上对应的 body 转换，否则请求会以 "contents is required" 被上游拒绝。
+	if isGeminiNativeImageModel(info.UpstreamModelName) {
+		geminiRequest := &dto.GeminiChatRequest{
+			Contents: []dto.GeminiChatContent{{
+				Role:  "user",
+				Parts: []dto.GeminiPart{{Text: request.Prompt}},
+			}},
+		}
+		// 分辨率档位来自客户请求的模型名（-2k/-4k 后缀，不带后缀即 1K），宽高比来自 size。
+		billingModel := info.OriginModelName
+		if billingModel == "" {
+			billingModel = info.UpstreamModelName
+		}
+		geminiRequest.GenerationConfig.ImageConfig = buildGeminiImageConfig(billingModel, request.Size)
+		return geminiRequest, nil
+	}
 	if !strings.HasPrefix(info.UpstreamModelName, "imagen") {
 		return nil, errors.New("not supported model for image generation, only imagen models are supported")
 	}
@@ -263,6 +282,13 @@ func (a *Adaptor) DoResponse(c *gin.Context, resp *http.Response, info *relaycom
 		return GeminiImageHandler(c, info, resp)
 	}
 
+	// Gemini 原生生图（nano-banana 系）：上游回的是 candidates[].content.parts[].inlineData，
+	// 不是 imagen 的 predictions —— 必须单独转成 OpenAI 生图格式，
+	// 否则会落到下面的 GeminiChatHandler，客户拿到聊天格式的响应体（data[] 为空）。
+	if isGeminiNativeImageModel(info.UpstreamModelName) && !info.IsStream {
+		return GeminiNativeImageHandler(c, info, resp)
+	}
+
 	// check if the model is an embedding model
 	if strings.HasPrefix(info.UpstreamModelName, "text-embedding") ||
 		strings.HasPrefix(info.UpstreamModelName, "embedding") ||
@@ -284,4 +310,16 @@ func (a *Adaptor) GetModelList() []string {
 
 func (a *Adaptor) GetChannelName() string {
 	return ChannelName
+}
+
+// isGeminiNativeImageModel 判断是否 Gemini 原生生图模型（走 :generateContent 而非 imagen 的 :predict）。
+// 覆盖官方名 gemini-3-pro-image / gemini-3.1-flash-image 及其 -preview 变体；
+// 各中转站常用的别名 nano-banana-pro / nano-banana-2 也一并认（同物异名，已由供应商确认）。
+func isGeminiNativeImageModel(model string) bool {
+	m := strings.ToLower(strings.TrimSpace(model))
+	if strings.HasPrefix(m, "imagen") {
+		return false
+	}
+	return (strings.HasPrefix(m, "gemini-") && strings.Contains(m, "image")) ||
+		strings.Contains(m, "nano-banana")
 }

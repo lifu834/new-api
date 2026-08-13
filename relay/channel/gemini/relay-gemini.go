@@ -1723,3 +1723,59 @@ func convertToolChoiceToGeminiConfig(toolChoice any) *dto.ToolConfig {
 	// Unsupported type, return nil
 	return nil
 }
+
+// GeminiNativeImageHandler 把 Gemini 原生生图（nano-banana 系）的响应转成 OpenAI 生图格式。
+//
+// 与 GeminiImageHandler(imagen) 的区别：imagen 回 predictions[].bytesBase64Encoded，
+// 原生生图回 candidates[].content.parts[].inlineData.data —— 结构完全不同，不能复用。
+// usage 用上游的 usageMetadata；它按 token 计量（图片走 IMAGE modality），
+// 我方对这些模型是按张计价，所以 usage 仅作记录，不参与计费。
+func GeminiNativeImageHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Response) (*dto.Usage, *types.NewAPIError) {
+	responseBody, readErr := io.ReadAll(resp.Body)
+	if readErr != nil {
+		return nil, types.NewOpenAIError(readErr, types.ErrorCodeBadResponseBody, http.StatusInternalServerError)
+	}
+	_ = resp.Body.Close()
+
+	var geminiResponse dto.GeminiChatResponse
+	if jsonErr := common.Unmarshal(responseBody, &geminiResponse); jsonErr != nil {
+		return nil, types.NewOpenAIError(jsonErr, types.ErrorCodeBadResponseBody, http.StatusInternalServerError)
+	}
+
+	openAIResponse := dto.ImageResponse{
+		Created: common.GetTimestamp(),
+		Data:    make([]dto.ImageData, 0, 1),
+	}
+	for _, candidate := range geminiResponse.Candidates {
+		for _, part := range candidate.Content.Parts {
+			if part.InlineData != nil && part.InlineData.Data != "" {
+				openAIResponse.Data = append(openAIResponse.Data, dto.ImageData{
+					B64Json: part.InlineData.Data,
+				})
+			}
+		}
+	}
+	if len(openAIResponse.Data) == 0 {
+		// 上游 200 但没带图：安全拦截、被截断、或换成了一段文字解释。
+		// 原样丢掉只会得到一句"no images generated"，排查时无从下手，
+		// 所以把 finishReason / blockReason / 文字部分一并带出去。
+		return nil, types.NewOpenAIError(
+			fmt.Errorf("no images generated (%s)", geminiNoImageReason(&geminiResponse)),
+			types.ErrorCodeBadResponseBody, http.StatusInternalServerError)
+	}
+
+	jsonResponse, jsonErr := json.Marshal(openAIResponse)
+	if jsonErr != nil {
+		return nil, types.NewError(jsonErr, types.ErrorCodeBadResponseBody)
+	}
+	c.Writer.Header().Set("Content-Type", "application/json")
+	c.Writer.WriteHeader(resp.StatusCode)
+	_, _ = c.Writer.Write(jsonResponse)
+
+	usage := &dto.Usage{
+		PromptTokens:     geminiResponse.UsageMetadata.PromptTokenCount,
+		CompletionTokens: geminiResponse.UsageMetadata.CandidatesTokenCount,
+		TotalTokens:      geminiResponse.UsageMetadata.TotalTokenCount,
+	}
+	return usage, nil
+}
