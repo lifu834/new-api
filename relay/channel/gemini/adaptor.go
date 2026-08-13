@@ -69,6 +69,9 @@ func (a *Adaptor) ConvertImageRequest(c *gin.Context, info *relaycommon.RelayInf
 				Parts: []dto.GeminiPart{{Text: request.Prompt}},
 			}},
 		}
+		// responseModalities 是必填项：不声明要图，模型可以合法地只回文字，
+		// 那样我们就会拿到一个 200 但没有 inlineData 的响应。
+		geminiRequest.GenerationConfig.ResponseModalities = []string{"IMAGE"}
 		// 分辨率档位来自客户请求的模型名（-2k/-4k 后缀，不带后缀即 1K），宽高比来自 size。
 		billingModel := info.OriginModelName
 		if billingModel == "" {

@@ -3,6 +3,10 @@ package gemini
 import (
 	"encoding/json"
 	"testing"
+
+	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/dto"
+	relaycommon "github.com/QuantumNous/new-api/relay/common"
 )
 
 func TestImageSizeFromModel(t *testing.T) {
@@ -38,14 +42,14 @@ func TestAspectRatioFromSize(t *testing.T) {
 		"16:9":      "16:9", // 比例式直接透传
 		"9:16":      "9:16",
 		// 落不进白名单 / 非法输入 → 省略，交给上游默认
-		"5:1":       "",
-		"1000x100":  "",
-		"":          "",
-		"1024":      "",
-		"axb":       "",
-		"0x1024":    "",
-		"-10x1024":  "",
-		"1024x0":    "",
+		"5:1":      "",
+		"1000x100": "",
+		"":         "",
+		"1024":     "",
+		"axb":      "",
+		"0x1024":   "",
+		"-10x1024": "",
+		"1024x0":   "",
 	}
 	for size, want := range cases {
 		if got := aspectRatioFromSize(size); got != want {
@@ -69,5 +73,61 @@ func TestBuildGeminiImageConfig(t *testing.T) {
 	raw := string(buildGeminiImageConfig("nano-banana-2", "1000x100"))
 	if raw != `{"imageSize":"1K"}` {
 		t.Errorf("got %s, want {\"imageSize\":\"1K\"}", raw)
+	}
+}
+
+// 按星桥文档 (doc.z5api.com/image-api.html) 校验我们实际发出的 body：
+// responseModalities 是文档里唯一标"必填"的字段，漏掉会让模型合法地只回文字。
+func TestConvertImageRequestMatchesDocumentedShape(t *testing.T) {
+	a := &Adaptor{}
+	info := &relaycommon.RelayInfo{
+		OriginModelName: "nano-banana-pro-4k",
+		ChannelMeta:     &relaycommon.ChannelMeta{UpstreamModelName: "gemini-3-pro-image-preview"},
+	}
+
+	got, err := a.ConvertImageRequest(nil, info, dto.ImageRequest{
+		Prompt: "a calico cat",
+		Size:   "3840x2160",
+	})
+	if err != nil {
+		t.Fatalf("ConvertImageRequest: %v", err)
+	}
+	raw, err := common.Marshal(got)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+
+	var body struct {
+		Contents []struct {
+			Role  string `json:"role"`
+			Parts []struct {
+				Text string `json:"text"`
+			} `json:"parts"`
+		} `json:"contents"`
+		GenerationConfig struct {
+			ResponseModalities []string `json:"responseModalities"`
+			ImageConfig        struct {
+				ImageSize   string `json:"imageSize"`
+				AspectRatio string `json:"aspectRatio"`
+			} `json:"imageConfig"`
+		} `json:"generationConfig"`
+	}
+	if err := common.Unmarshal(raw, &body); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+
+	gc := body.GenerationConfig
+	if len(gc.ResponseModalities) != 1 || gc.ResponseModalities[0] != "IMAGE" {
+		t.Errorf("responseModalities = %v, want [IMAGE]", gc.ResponseModalities)
+	}
+	if gc.ImageConfig.ImageSize != "4K" {
+		t.Errorf("imageSize = %q, want 4K", gc.ImageConfig.ImageSize)
+	}
+	if gc.ImageConfig.AspectRatio != "16:9" {
+		t.Errorf("aspectRatio = %q, want 16:9", gc.ImageConfig.AspectRatio)
+	}
+	if len(body.Contents) != 1 || body.Contents[0].Role != "user" ||
+		len(body.Contents[0].Parts) != 1 || body.Contents[0].Parts[0].Text != "a calico cat" {
+		t.Errorf("contents = %+v, want single user/text part", body.Contents)
 	}
 }
