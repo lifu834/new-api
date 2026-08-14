@@ -372,6 +372,12 @@ func getModelRequest(c *gin.Context) (*ModelRequest, bool, error) {
 	if strings.HasPrefix(c.Request.URL.Path, "/v1/responses/compact") && modelRequest.Model != "" {
 		modelRequest.Model = ratio_setting.WithCompactModelSuffix(modelRequest.Model)
 	}
+
+	// nano-banana 对外只有两个模型名，档位由 size 决定。必须在这里（分发前）翻成
+	// 内部 SKU，之后计价 / 选渠道 / 日志才会一致。见 banana_tier.go。
+	if strings.Contains(c.Request.URL.Path, "/v1/images/") && modelRequest.Model != "" {
+		modelRequest.Model = withBananaTierSuffix(c, modelRequest.Model)
+	}
 	return &modelRequest, shouldSelectChannel, nil
 }
 

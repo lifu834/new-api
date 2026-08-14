@@ -185,6 +185,9 @@ func ListModels(c *gin.Context, modelType int) {
 					continue
 				}
 			}
+			if constant.IsBananaHiddenTierSKU(modelName) {
+				continue
+			}
 			if oaiModel, ok := openAIModelsMap[modelName]; ok {
 				oaiModel.SupportedEndpointTypes = model.GetModelSupportEndpointTypes(modelName)
 				userOpenAiModels = append(userOpenAiModels, oaiModel)
