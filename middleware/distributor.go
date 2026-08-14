@@ -373,10 +373,13 @@ func getModelRequest(c *gin.Context) (*ModelRequest, bool, error) {
 		modelRequest.Model = ratio_setting.WithCompactModelSuffix(modelRequest.Model)
 	}
 
-	// nano-banana 对外只有两个模型名，档位由 size 决定。必须在这里（分发前）翻成
-	// 内部 SKU，之后计价 / 选渠道 / 日志才会一致。见 banana_tier.go。
-	if strings.Contains(c.Request.URL.Path, "/v1/images/") && modelRequest.Model != "" {
-		modelRequest.Model = withBananaTierSuffix(c, modelRequest.Model)
+	// 档位模型（nano-banana / kling）对外只暴露基名，分辨率由 size 决定。
+	// 必须在这里（分发前）翻成内部 SKU，之后计价 / 选渠道 / 日志才会一致。
+	// 见 model_tier.go。
+	if modelRequest.Model != "" &&
+		(strings.Contains(c.Request.URL.Path, "/v1/images/") ||
+			strings.Contains(c.Request.URL.Path, "/v1/video")) {
+		modelRequest.Model = withTierSuffix(c, modelRequest.Model)
 	}
 	return &modelRequest, shouldSelectChannel, nil
 }
