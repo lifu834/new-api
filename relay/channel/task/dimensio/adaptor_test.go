@@ -76,26 +76,27 @@ func TestFitResolution(t *testing.T) {
 // TestCapTableInvariants 守住能力表里最容易记错、且记错就会造成
 // "扣了钱拿到降级货" 的几条硬约束。
 func TestCapTableInvariants(t *testing.T) {
-	// rlm 只收 16:9 / 9:16
+	// rlm 系 260816 已随上游下架，条目移除；未登记模型 capsFor 返回 (zero,false)
 	for _, m := range []string{"rlm-seedance-2.0", "rlm-seedance-2.0-fast", "rlm-seedance-2.0-mini"} {
-		c := modelCapTable[m]
-		if c.Ratios["1:1"] || c.Ratios["4:3"] {
-			t.Errorf("%s 只应支持 16:9/9:16", m)
-		}
-		if !c.Ratios["16:9"] || !c.Ratios["9:16"] {
-			t.Errorf("%s 应支持 16:9 与 9:16", m)
+		if _, ok := modelCapTable[m]; ok {
+			t.Errorf("%s 已下架，不应留在能力表里", m)
 		}
 	}
-	// dvc 系列没有 omni_reference（收不了参考视频/音频，做不了多图锁脸）
-	for _, m := range []string{"dvc-seedance-2.0", "dvc-seedance-2.0-fast"} {
-		if modelCapTable[m].OmniRef {
-			t.Errorf("%s 不应标记为支持 omni_reference", m)
-		}
-	}
-	// 其余 provider 都支持 omni_reference
-	for _, m := range []string{"hgf-seedance-2.0", "rlm-seedance-2.0-fast", "pxv-seedance-2.0-standard", "jmg-video-seedance-2.0-vip"} {
+	// ❗ dvc 的 OmniRef 曾记为 false（"只有 first_last"）——260816 实测推翻：
+	// omni_reference + 真人参考正常出片且锁脸成功（用户肉眼比对确认）。
+	// 全部在册 provider 均支持 omni_reference。
+	for _, m := range []string{"dvc-seedance-2.0", "dvc-seedance-2.0-fast",
+		"hgf-seedance-2.0", "pxv-seedance-2.0-standard", "jmg-video-seedance-2.0-vip",
+		"akl-seedance-2.0"} {
 		if !modelCapTable[m].OmniRef {
 			t.Errorf("%s 应支持 omni_reference", m)
+		}
+	}
+	// akl 用 adaptive 而非 auto（260816 实测 adaptive 可用；auto 不在其枚举里）
+	for _, m := range []string{"akl-seedance-2.0", "akl-seedance-2.0-fast", "akl-seedance-2.0-mini"} {
+		c := modelCapTable[m]
+		if !c.Ratios["adaptive"] || c.Ratios["auto"] {
+			t.Errorf("%s 应支持 adaptive 且不含 auto", m)
 		}
 	}
 	// ModelList 里不能混进裸名路由器（会导致静默降级）
@@ -103,7 +104,7 @@ func TestCapTableInvariants(t *testing.T) {
 		if _, ok := modelCapTable[m]; !ok {
 			t.Errorf("ModelList 含未登记能力的模型 %s", m)
 		}
-		if len(m) < 4 || (m[:4] != "dvc-" && m[:4] != "hgf-" && m[:4] != "jmg-" && m[:4] != "pxv-" && m[:4] != "rlm-") {
+		if len(m) < 4 || (m[:4] != "dvc-" && m[:4] != "hgf-" && m[:4] != "jmg-" && m[:4] != "pxv-" && m[:4] != "akl-") {
 			t.Errorf("ModelList 含非 provider 直连模型 %s（裸名路由器会静默降级分辨率）", m)
 		}
 	}
