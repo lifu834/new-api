@@ -46,6 +46,28 @@ var TieredModelFamilies = []TieredModelFamily{
 		Tiers:   []ModelTier{{0, ""}, {1_500_000, "-1080p"}},
 		Aliases: []string{"kling-3.0-720p"},
 	},
+	{
+		// seedance（overseas 组）：1280x720=921,600 / 1920x1080=2,073,600 /
+		// 3840x2160=8,294,400。基名本身即 720p 档（dimensio 的 defaultResName
+		// 也是 720p），与 ¥0.88/秒 的定价对齐。
+		//
+		// 这一族原本走的是相反的约定——分辨率写死在对外名里、并**拒绝**
+		// `resolution` 参数，理由同样是防止"付 1080p 拿 720p"。档位中间件
+		// 出现得更晚，它用改写模型名的方式给出同一个保证（计价/选渠道/日志
+		// 看到的都是解析后的 SKU），于是参数可以放开了。
+		// 旧的五个名字只隐藏、不摘除，在用的客户不受影响。
+		Bases:   []string{"sd-2.0"},
+		Tiers:   []ModelTier{{0, ""}, {1_500_000, "-1080p"}, {6_000_000, "-4k"}},
+		Aliases: []string{"sd-2.0-720p"},
+	},
+	{
+		// sd-fast / sd-mini 上游只有 720p 一档，没有档位阶梯。
+		// 纳入本表只为把 "-720p" 这个赘余后缀从对外名里去掉，
+		// 让 overseas 三个档的对外形态一致（sd-2.0 / sd-fast / sd-mini）。
+		Bases:   []string{"sd-fast", "sd-mini"},
+		Tiers:   []ModelTier{{0, ""}},
+		Aliases: []string{"sd-fast-720p", "sd-mini-720p"},
+	},
 }
 
 // TieredFamilyOf 返回该模型名所属的档位族（仅当它是对外基名时）。
@@ -72,10 +94,31 @@ func (f *TieredModelFamily) SuffixForPixels(px int) string {
 	return suffix
 }
 
-// IsHiddenTierSKU 判断是否是不该出现在 /v1/models 里的内部档位 SKU。
-// 只隐藏，不从 abilities 摘除——显式请求 nano-banana-pro-4k / kling-3.0-1080p
-// 的老调用仍照常工作。
-func IsHiddenTierSKU(model string) bool {
+// HiddenLegacyModels 是历史遗留的重复名：与某个 canonical 模型同渠道、同价，
+// 只是名字里带着供应商（leonardo-*），既是噪音也把进货来源暴露给了客户。
+//
+// 与档位 SKU 一样**只隐藏、不摘除**——已经在用这些名字的调用继续可用，
+// 不制造断裂；新客户在 /v1/models 里只会看到 canonical 名。
+var HiddenLegacyModels = []string{
+	"leonardo-kling-3.0",       // = kling-3.0
+	"leonardo-kling-3.0-turbo", // = kling-3.0-turbo
+	"leonardo-kling-o3",        // = kling-o3
+	"leonardo-veo-3.1",         // = veo-3.1
+	"leonardo-veo-3.1-fast",    // = veo-3.1-fast
+}
+
+// IsHiddenModel 判断是否不该出现在 /v1/models 里：内部档位 SKU，或历史遗留重复名。
+// 两类都只隐藏、不从 abilities 摘除，显式调用仍然工作。
+func IsHiddenModel(model string) bool {
+	for _, m := range HiddenLegacyModels {
+		if model == m {
+			return true
+		}
+	}
+	return isHiddenTierSKU(model)
+}
+
+func isHiddenTierSKU(model string) bool {
 	for _, f := range TieredModelFamilies {
 		for _, a := range f.Aliases {
 			if model == a {

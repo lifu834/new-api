@@ -43,9 +43,8 @@ var ModelList = []string{
 	"pxv-seedance-2.0-fast",
 	"pxv-seedance-2.0-mini",
 	"pxv-seedance-2.0-standard",
-	"rlm-seedance-2.0",
-	"rlm-seedance-2.0-fast",
-	"rlm-seedance-2.0-mini",
+	// rlm 系 260816 已从上游 /v1/models 消失（下架），条目移除；
+	// akl 系为同期新增（见 modelCapTable）。
 }
 
 var ChannelName = "dimensio-video"
@@ -89,13 +88,25 @@ func caps(res, ratios []string, omni bool) modelCaps {
 var (
 	ratiosFull = []string{"1:1", "21:9", "16:9", "9:16", "3:4", "4:3"}
 	ratiosAuto = []string{"auto", "16:9", "9:16", "4:3", "3:4", "1:1", "21:9"}
+	// akl 家族用 adaptive 代替 auto（260816 实测：adaptive 可用）
+	ratiosAdaptive = []string{"adaptive", "1:1", "4:3", "3:4", "16:9", "9:16", "21:9"}
 	// rlm 只收这两种，其余会被拒或重路由
 	ratiosRLM = []string{"16:9", "9:16"}
 )
 
 var modelCapTable = map[string]modelCaps{
-	"dvc-seedance-2.0":                caps([]string{"480p", "720p", "1080p", "4k"}, ratiosFull, false),
-	"dvc-seedance-2.0-fast":           caps([]string{"480p", "720p"}, ratiosFull, false),
+	// dvc：OmniRef 原记 false（"只有 first_last"）——❌ 260816 实测推翻：
+	// omni_reference + 真人参考图正常出片且**锁脸成功**（用户肉眼比对确认，
+	// banana 合成脸 → dvc 480p，¥0.84）。它是 dimensio 最便宜的锁脸线。
+	"dvc-seedance-2.0":                caps([]string{"480p", "720p", "1080p", "4k"}, ratiosFull, true),
+	"dvc-seedance-2.0-fast":           caps([]string{"480p", "720p"}, ratiosFull, true),
+	// akl（260816 补录，/v1/models + 实测）：比例枚举是 adaptive 不是 auto；
+	// ⚠️ 纯文生**不能**用 first_last_frames 模式（akl 会静默失败连 fail_reason
+	// 都不给，dvc 的"first_last+0图=文生"惯例不通用），默认 omni 即可。
+	// 锁脸未实测，暂按支持处理（同价位 hgf 已验，akl 是候选降本线）。
+	"akl-seedance-2.0":                caps([]string{"480p", "720p", "1080p", "4k"}, ratiosAdaptive, true),
+	"akl-seedance-2.0-fast":           caps([]string{"480p", "720p"}, ratiosAdaptive, true),
+	"akl-seedance-2.0-mini":           caps([]string{"480p", "720p"}, ratiosAdaptive, true),
 	"hgf-seedance-2.0":                caps([]string{"480p", "720p", "1080p", "4k"}, ratiosAuto, true),
 	"hgf-seedance-2.0-fast":           caps([]string{"480p", "720p"}, ratiosAuto, true),
 	"hgf-seedance-2.0-mini":           caps([]string{"480p", "720p"}, ratiosAuto, true),
@@ -107,9 +118,7 @@ var modelCapTable = map[string]modelCaps{
 	"pxv-seedance-2.0-fast":           caps([]string{"480p", "720p"}, ratiosFull, true),
 	"pxv-seedance-2.0-mini":           caps([]string{"480p", "720p"}, ratiosFull, true),
 	"pxv-seedance-2.0-standard":       caps([]string{"480p", "720p", "1080p", "2160p"}, ratiosFull, true),
-	"rlm-seedance-2.0":                caps([]string{"480p", "720p", "1080p"}, ratiosRLM, true),
-	"rlm-seedance-2.0-fast":           caps([]string{"480p", "720p", "1080p"}, ratiosRLM, true),
-	"rlm-seedance-2.0-mini":           caps([]string{"480p", "720p"}, ratiosRLM, true),
+	// rlm-* 已下架（260816 上游 /v1/models 不再返回），条目移除。
 }
 
 // capsFor 取模型能力；未知模型返回 (zero, false)，调用方一律放行
