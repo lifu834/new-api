@@ -105,20 +105,11 @@ func (a *TaskAdaptor) ValidateRequestAndSetAction(c *gin.Context, info *relaycom
 			"invalid_request", http.StatusBadRequest)
 	}
 	media := collectMediaURLs(c, &req)
-	// 该上游的 files 字段**强制必填**（不传/传空串均报 "files is required"），
-	// 即它只做图生视频/参考生视频，**不支持纯文生**。这里提前拦下，避免纯文生请求
-	// 一路打到上游才拿到看不懂的报错。
-	//
-	// 🔑 用**可重试**错误而不是 LocalError：本渠道现在与 meaicc / sudashui 同挂在
-	// seedance-2.0 这一个对外名下，而那两家都支持纯文生。若在这里返回 LocalError，
-	// 会中止整条重试链 —— 客户的纯文生请求一旦轮到本渠道就彻底失败，哪怕别的
-	// 渠道完全可用。"重试没意义"只在单渠道时成立，多渠道下必须让它落到下一家。
-	if len(media) == 0 {
-		return service.TaskErrorWrapper(
-			errors.New("this model requires at least one reference material (image/video/audio); "+
-				"text-to-video is served by other channels"),
-			"invalid_request", http.StatusBadRequest)
-	}
+	// ❗ 260816 起本渠道插的是**海外组** key（per_second）：纯文生是支持的
+	// （functionMode=first_last_frames + 无素材，直连实测提交 OK、¥0.70/秒）。
+	// 旧守卫"必须带素材"是**特价组** key 的约束（files 必填、按次计费），
+	// 随换 key 一并移除。若将来换回特价 key，上游会以 "files is required"
+	// 明确拒绝并走渠道 failover，不会静默。
 	for _, u := range media {
 		if strings.HasPrefix(u, "data:") {
 			return service.TaskErrorWrapperLocal(
@@ -126,14 +117,17 @@ func (a *TaskAdaptor) ValidateRequestAndSetAction(c *gin.Context, info *relaycom
 				"invalid_request", http.StatusBadRequest)
 		}
 	}
-	// 本渠道 files 强制必填（见上），走到这里必然带了素材，
-	// 所以「操作」只可能是参考生成。不设它的话 service/task_billing.go
-	// 会把消费日志写成 "操作 ，..."。
+	// 「操作」按素材有无分流，否则 service/task_billing.go 会把消费日志
+	// 写成 "操作 ，..."。
 	// ⚠️ 只在管线没定过的时候才设：ResolveOriginTask 会在**进重试循环之前**
 	// 把 /v1/videos/:id/remix 标成 TaskActionRemix（relay_task.go:42），
 	// 而 Validate 在那之后才跑。无条件赋值会把 remix 覆盖成普通生成。
 	if info.Action == "" {
-		info.Action = constant.TaskActionReferenceGenerate
+		if len(media) == 0 {
+			info.Action = constant.TaskActionTextGenerate
+		} else {
+			info.Action = constant.TaskActionReferenceGenerate
+		}
 	}
 	c.Set("task_request", req)
 	return nil
@@ -222,8 +216,14 @@ func (a *TaskAdaptor) BuildRequestBody(c *gin.Context, info *relaycommon.RelayIn
 	_ = w.WriteField("duration", strconv.Itoa(resolveDuration(&req)))
 	_ = w.WriteField("resolution", "720p")
 	_ = w.WriteField("aspect_ratio", ratioFromRequest(c))
+	media := collectMediaURLs(c, &req)
+	if len(media) == 0 {
+		// 海外组的纯文生惯例：first_last_frames + 无素材（260816 直连实测）。
+		// 不写 functionMode 时上游默认 omni_reference，无素材会被拒。
+		_ = w.WriteField("functionMode", "first_last_frames")
+	}
 	// files 是 URL 字符串（不是文件上传）。多个素材重复写同名字段。
-	for _, u := range collectMediaURLs(c, &req) {
+	for _, u := range media {
 		_ = w.WriteField("files", u)
 	}
 	if err := w.Close(); err != nil {

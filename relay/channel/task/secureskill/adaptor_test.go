@@ -143,3 +143,49 @@ func TestEstimateBillingSeconds(t *testing.T) {
 		}
 	}
 }
+
+// TestBuildRequestBodyPureText 260816 换成海外组 key（per_second）后纯文生放行：
+// 无素材时必须带 functionMode=first_last_frames（海外组纯文生惯例，直连实测），
+// 不带的话上游默认 omni_reference 会拒无素材请求；有素材时不发 functionMode，
+// 素材以 files=URL 重复字段发（特价时代验证过的形态，海外组沿用）。
+func TestBuildRequestBodyPureText(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	a := &TaskAdaptor{}
+
+	build := func(req relaycommon.TaskSubmitReq) string {
+		c, _ := gin.CreateTestContext(httptest.NewRecorder())
+		c.Request = httptest.NewRequest("POST", "/v1/videos", strings.NewReader("{}"))
+		c.Set("task_request", req)
+		r, err := a.BuildRequestBody(c, &relaycommon.RelayInfo{ChannelMeta: &relaycommon.ChannelMeta{UpstreamModelName: "video-2.0-pro"}})
+		if err != nil {
+			t.Fatalf("BuildRequestBody: %v", err)
+		}
+		var sb strings.Builder
+		buf := make([]byte, 64*1024)
+		for {
+			n, e := r.Read(buf)
+			sb.Write(buf[:n])
+			if e != nil {
+				break
+			}
+		}
+		return sb.String()
+	}
+
+	pure := build(relaycommon.TaskSubmitReq{Prompt: "a cat", Duration: 4})
+	if !strings.Contains(pure, "first_last_frames") {
+		t.Error("纯文生须带 functionMode=first_last_frames，否则上游按 omni 拒无素材请求")
+	}
+	if strings.Contains(pure, "name=\"files\"") {
+		t.Error("纯文生不应出现 files 字段")
+	}
+
+	ref := build(relaycommon.TaskSubmitReq{Prompt: "a cat", Duration: 4,
+		Images: []string{"https://example.com/a.png"}})
+	if strings.Contains(ref, "functionMode") {
+		t.Error("带素材时不应发 functionMode（沿用验证过的 files 形态）")
+	}
+	if !strings.Contains(ref, "https://example.com/a.png") {
+		t.Error("素材 URL 未写入 files 字段")
+	}
+}
