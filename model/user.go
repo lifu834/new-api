@@ -80,6 +80,44 @@ func (user *User) SetAccessToken(token string) {
 	user.AccessToken = &token
 }
 
+// UpdateUserAccessToken 轮换管理令牌。不走 user.Update,避免把调用方手里的
+// 旧快照整片写回数据库,覆盖并发扣费产生的 quota/aff_quota 变化。
+func UpdateUserAccessToken(id int, token string) error {
+	if id == 0 {
+		return errors.New("id 为空！")
+	}
+	result := DB.Model(&User{}).Where("id = ?", id).Update("access_token", token)
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return gorm.ErrRecordNotFound
+	}
+	return nil
+}
+
+// UpdateUserSetting 只更新 setting 列并只刷新缓存里的 Setting 字段。
+// 用户改语言/侧边栏这类高频写入必须走这里:走 user.Update 会把旧快照的
+// Quota 一起写进 Redis 用户缓存(UserBase 含 Quota),等于把额度回滚。
+func UpdateUserSetting(id int, setting dto.UserSetting) error {
+	if id == 0 {
+		return errors.New("id 为空！")
+	}
+	settingBytes, err := json.Marshal(setting)
+	if err != nil {
+		return err
+	}
+	settingStr := string(settingBytes)
+	result := DB.Model(&User{}).Where("id = ?", id).Update("setting", settingStr)
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return gorm.ErrRecordNotFound
+	}
+	return updateUserSettingCache(id, settingStr)
+}
+
 func (user *User) GetSetting() dto.UserSetting {
 	setting := dto.UserSetting{}
 	if user.Setting != "" {
@@ -339,7 +377,6 @@ func HardDeleteUserById(id int) error {
 	return err
 }
 
-
 // nycatai: 兑换/充值后给邀请人返佣
 func GiveAffRebate(userId int, quota int) {
 	if common.AffRebatePercent <= 0 || quota <= 0 {
@@ -364,15 +401,21 @@ func GiveAffRebate(userId int, quota int) {
 	RecordLog(user.InviterId, LogTypeSystem, fmt.Sprintf("邀请返佣 %s (来自用户 #%d 的充值)", logger.LogQuota(rebate), userId))
 }
 
-func inviteUser(inviterId int) (err error) {
-	user, err := GetUserById(inviterId, true)
-	if err != nil {
-		return err
+func inviteUser(inviterId int) error {
+	// 原子自增。原先读整行再 DB.Save 会把读取瞬间的 quota/used_quota 一起写回,
+	// 并发扣费会被这次保存覆盖掉。
+	result := DB.Model(&User{}).Where("id = ?", inviterId).Updates(map[string]interface{}{
+		"aff_count":   gorm.Expr("aff_count + ?", 1),
+		"aff_quota":   gorm.Expr("aff_quota + ?", common.QuotaForInviter),
+		"aff_history": gorm.Expr("aff_history + ?", common.QuotaForInviter),
+	})
+	if result.Error != nil {
+		return result.Error
 	}
-	user.AffCount++
-	user.AffQuota += common.QuotaForInviter
-	user.AffHistoryQuota += common.QuotaForInviter
-	return DB.Save(user).Error
+	if result.RowsAffected == 0 {
+		return gorm.ErrRecordNotFound
+	}
+	return invalidateUserCache(inviterId)
 }
 
 func (user *User) TransferAffQuotaToQuota(quota int) error {
@@ -552,11 +595,27 @@ func (user *User) Update(updatePassword bool) error {
 	}
 	newUser := *user
 	DB.First(&user, user.Id)
-	if err = DB.Model(user).Updates(newUser).Error; err != nil {
+	// 绝不通过整片结构体写回这些列:调用方手里的 user 是若干毫秒前的快照,
+	// 期间的扣费/返佣变化会被覆盖回去(额度回滚)。这些列各有专用写入路径:
+	// quota -> IncreaseUserQuota/DecreaseUserQuota, access_token -> UpdateUserAccessToken,
+	// aff_* -> inviteUser/TransferAffQuotaToQuota。
+	if err = DB.Model(user).Omit(
+		"access_token",
+		"quota",
+		"used_quota",
+		"request_count",
+		"aff_count",
+		"aff_quota",
+		"aff_history",
+	).Updates(newUser).Error; err != nil {
 		return err
 	}
 
-	// Update cache
+	// 回读落库后的真实行再写缓存,避免把上面被 Omit 掉的旧值塞进 Redis
+	// (UserBase 含 Quota,写错就等于额度回滚)。
+	if err = DB.First(user, user.Id).Error; err != nil {
+		return err
+	}
 	return updateUserCache(*user)
 }
 
@@ -585,7 +644,10 @@ func (user *User) Edit(updatePassword bool) error {
 		return err
 	}
 
-	// Update cache
+	// 回读落库后的行再写缓存,否则缓存里留的是更新前的 username/group。
+	if err = DB.First(user, user.Id).Error; err != nil {
+		return err
+	}
 	return updateUserCache(*user)
 }
 
