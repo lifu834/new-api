@@ -2,6 +2,7 @@ package gemini
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -1724,6 +1725,33 @@ func convertToolChoiceToGeminiConfig(toolChoice any) *dto.ToolConfig {
 	return nil
 }
 
+// fetchImageAsBase64 下载 fileData.fileUri 指向的图片并转成 base64。
+// 4K 图可达 20MB，给足超时；限 64MB 防止上游给个巨型文件把内存打爆。
+func fetchImageAsBase64(uri string) (string, error) {
+	req, err := http.NewRequest(http.MethodGet, uri, nil)
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/128")
+	client := &http.Client{Timeout: 180 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("下载图片 HTTP %d", resp.StatusCode)
+	}
+	data, err := io.ReadAll(io.LimitReader(resp.Body, 64<<20))
+	if err != nil {
+		return "", err
+	}
+	if len(data) == 0 {
+		return "", fmt.Errorf("下载图片为空")
+	}
+	return base64.StdEncoding.EncodeToString(data), nil
+}
+
 // GeminiNativeImageHandler 把 Gemini 原生生图（nano-banana 系）的响应转成 OpenAI 生图格式。
 //
 // 与 GeminiImageHandler(imagen) 的区别：imagen 回 predictions[].bytesBase64Encoded，
@@ -1752,6 +1780,18 @@ func GeminiNativeImageHandler(c *gin.Context, info *relaycommon.RelayInfo, resp 
 				openAIResponse.Data = append(openAIResponse.Data, dto.ImageData{
 					B64Json: part.InlineData.Data,
 				})
+				continue
+			}
+			// 260824: 有的中转站不回 inlineData，而是回 fileData.fileUri（下载链接）——
+			// 云枢就是这样，我们只认 inlineData 时会「上游成功但我们丢图」，
+			// 表现为「它只能出 1K」，实际它 4K 出的是 4096×4096。按 b64 取回来统一成同一种响应，
+			// 客户端拿到的仍是 b64_json，不必关心上游差异。
+			if part.FileData != nil && part.FileData.FileUri != "" {
+				if b64, err := fetchImageAsBase64(part.FileData.FileUri); err == nil {
+					openAIResponse.Data = append(openAIResponse.Data, dto.ImageData{B64Json: b64})
+				} else {
+					common.SysError("gemini native image: 取 fileUri 失败 " + part.FileData.FileUri + ": " + err.Error())
+				}
 			}
 		}
 	}
