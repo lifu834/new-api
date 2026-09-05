@@ -185,7 +185,7 @@ func ListModels(c *gin.Context, modelType int) {
 					continue
 				}
 			}
-			if constant.IsHiddenTierSKU(modelName) {
+			if constant.IsHiddenModel(modelName) {
 				continue
 			}
 			if oaiModel, ok := openAIModelsMap[modelName]; ok {
