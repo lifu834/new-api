@@ -315,6 +315,7 @@ docker run --name new-api -d --restart always \
 | `STREAMING_TIMEOUT` | Streaming timeout (seconds) | `300` |
 | `STREAM_SCANNER_MAX_BUFFER_MB` | Max per-line buffer (MB) for the stream scanner; increase when upstream sends huge image/base64 payloads | `64` |
 | `MAX_REQUEST_BODY_MB` | Max request body size (MB, counted **after decompression**; prevents huge requests/zip bombs from exhausting memory). Exceeding it returns `413` | `32` |
+| `TRUSTED_PROXIES` | Comma-separated IPs/CIDRs of the reverse proxies in front of New API. Only these peers may set the client IP via `X-Forwarded-For` / `X-Real-IP`; everyone else gets their TCP address recorded. `*` = trust all (gin's legacy behavior), `none` = trust nobody | loopback + RFC1918 + IPv6 ULA |
 | `AZURE_DEFAULT_API_VERSION` | Azure API version | `2025-04-01-preview` |
 | `ERROR_LOG_ENABLED` | Error log switch | `false` |
 | `PYROSCOPE_URL` | Pyroscope server address | - |

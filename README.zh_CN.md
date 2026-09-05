@@ -315,6 +315,7 @@ docker run --name new-api -d --restart always \
 | `STREAMING_TIMEOUT` | 流式超时时间（秒）                                                    | `300` |
 | `STREAM_SCANNER_MAX_BUFFER_MB` | 流式扫描器单行最大缓冲（MB），图像生成等超大 `data:` 片段（如 4K 图片 base64）需适当调大 | `64` |
 | `MAX_REQUEST_BODY_MB` | 请求体最大大小（MB，**解压后**计；防止超大请求/zip bomb 导致内存暴涨），超过将返回 `413` | `32` |
+| `TRUSTED_PROXIES` | 前置反向代理的 IP/CIDR（逗号分隔）。只有这些来源发来的 `X-Forwarded-For` / `X-Real-IP` 才被采信，其余一律记录 TCP 对端地址。`*` = 信任所有（gin 原始行为），`none` = 谁都不信 | 环回 + RFC1918 私网 + IPv6 ULA |
 | `AZURE_DEFAULT_API_VERSION` | Azure API 版本                                                 | `2025-04-01-preview` |
 | `ERROR_LOG_ENABLED` | 错误日志开关                                                       | `false` |
 | `PYROSCOPE_URL` | Pyroscope 服务地址                                            | - |

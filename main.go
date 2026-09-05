@@ -156,6 +156,8 @@ func main() {
 
 	// Initialize HTTP server
 	server := gin.New()
+	// 决定 c.ClientIP() 是否采信 X-Forwarded-For，详见 trusted_proxies.go
+	setupTrustedProxies(server)
 	server.Use(gin.CustomRecovery(func(c *gin.Context, err any) {
 		common.SysLog(fmt.Sprintf("panic detected: %v", err))
 		c.JSON(http.StatusInternalServerError, gin.H{

@@ -315,6 +315,7 @@ docker run --name new-api -d --restart always \
 | `STREAMING_TIMEOUT` | Délai d'expiration du streaming (secondes) | `300` |
 | `STREAM_SCANNER_MAX_BUFFER_MB` | Taille max du buffer par ligne (Mo) pour le scanner SSE ; à augmenter quand les sorties image/base64 sont très volumineuses (ex. images 4K) | `64` |
 | `MAX_REQUEST_BODY_MB` | Taille maximale du corps de requête (Mo, comptée **après décompression** ; évite les requêtes énormes/zip bombs qui saturent la mémoire). Dépassement ⇒ `413` | `32` |
+| `TRUSTED_PROXIES` | IP/CIDR (séparés par des virgules) des reverse proxies placés devant New API. Seuls ces pairs peuvent définir l'IP client via `X-Forwarded-For` / `X-Real-IP` ; pour les autres, l'adresse TCP est enregistrée. `*` = tout faire confiance (comportement historique de gin), `none` = ne faire confiance à personne | loopback + RFC1918 + ULA IPv6 |
 | `AZURE_DEFAULT_API_VERSION` | Version de l'API Azure | `2025-04-01-preview` |
 | `ERROR_LOG_ENABLED` | Interrupteur du journal d'erreurs | `false` |
 | `PYROSCOPE_URL` | Adresse du serveur Pyroscope | - |

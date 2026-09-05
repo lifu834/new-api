@@ -317,6 +317,7 @@ docker run --name new-api -d --restart always \
 | `STREAMING_TIMEOUT` | ストリーミング応答のタイムアウト時間（秒） | `300` |
 | `STREAM_SCANNER_MAX_BUFFER_MB` | ストリームスキャナの1行あたりバッファ上限（MB）。4K画像など巨大なbase64 `data:` ペイロードを扱う場合は値を増加させてください | `64` |
 | `MAX_REQUEST_BODY_MB` | リクエストボディ最大サイズ（MB、**解凍後**に計測。巨大リクエスト/zip bomb によるメモリ枯渇を防止）。超過時は `413` | `32` |
+| `TRUSTED_PROXIES` | New API の前段にあるリバースプロキシの IP/CIDR（カンマ区切り）。これらの接続元からの `X-Forwarded-For` / `X-Real-IP` のみを信頼し、それ以外は TCP 対向アドレスを記録します。`*` = すべて信頼（gin 従来の挙動）、`none` = 一切信頼しない | ループバック + RFC1918 + IPv6 ULA |
 | `AZURE_DEFAULT_API_VERSION` | Azure APIバージョン | `2025-04-01-preview` |
 | `ERROR_LOG_ENABLED` | エラーログスイッチ | `false` |
 | `PYROSCOPE_URL` | Pyroscopeサーバーのアドレス | - |
