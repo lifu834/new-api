@@ -41,18 +41,18 @@ type ImageURL struct {
 }
 
 type responseTask struct {
-	ID                 string `json:"id"`
-	TaskID             string `json:"task_id,omitempty"` //兼容旧接口
-	Object             string `json:"object"`
-	Model              string `json:"model"`
-	Status             string `json:"status"`
-	Progress           int    `json:"progress"`
-	CreatedAt          int64  `json:"created_at"`
-	CompletedAt        int64  `json:"completed_at,omitempty"`
-	ExpiresAt          int64  `json:"expires_at,omitempty"`
+	ID                 string          `json:"id"`
+	TaskID             string          `json:"task_id,omitempty"` //兼容旧接口
+	Object             string          `json:"object"`
+	Model              string          `json:"model"`
+	Status             string          `json:"status"`
+	Progress           int             `json:"progress"`
+	CreatedAt          int64           `json:"created_at"`
+	CompletedAt        int64           `json:"completed_at,omitempty"`
+	ExpiresAt          int64           `json:"expires_at,omitempty"`
 	Seconds            json.RawMessage `json:"seconds,omitempty"` // 上游可能回字符串("5")或数字(5)，原样保留避免解析失败
-	Size               string `json:"size,omitempty"`
-	RemixedFromVideoID string `json:"remixed_from_video_id,omitempty"`
+	Size               string          `json:"size,omitempty"`
+	RemixedFromVideoID string          `json:"remixed_from_video_id,omitempty"`
 	Error              *struct {
 		Message string `json:"message"`
 		Code    string `json:"code"`
@@ -108,12 +108,23 @@ func (a *TaskAdaptor) EstimateBilling(c *gin.Context, info *relaycommon.RelayInf
 		return nil
 	}
 
+	// 260903: 这个 adaptor 服务的绝大多数渠道不是 Sora（video2api / leonardo2api / yunshu 等
+	// 同形态 /v1/videos 渠道也是 type=55），它们的分辨率与价格都钉在模型名里：
+	//   · 默认时长必须与 video2api 的生成默认(5s)一致，否则客户不传 duration 时"计 4 秒、生 5 秒"；
+	//   · Sora 的 1792x1024 / 1024x1792 ×1.667 尺寸系数只对真 Sora 模型有意义，
+	//     对 SKU 计价的渠道会让照 Sora 习惯传 size 的客户莫名多付 67%。
+	isSora := strings.HasPrefix(strings.ToLower(req.Model), "sora")
+
 	seconds, _ := strconv.Atoi(req.Seconds)
 	if seconds == 0 {
 		seconds = req.Duration
 	}
 	if seconds <= 0 {
-		seconds = 4
+		if isSora {
+			seconds = 4
+		} else {
+			seconds = 5
+		}
 	}
 
 	size := req.Size
@@ -125,7 +136,7 @@ func (a *TaskAdaptor) EstimateBilling(c *gin.Context, info *relaycommon.RelayInf
 		"seconds": float64(seconds),
 		"size":    1,
 	}
-	if size == "1792x1024" || size == "1024x1792" {
+	if isSora && (size == "1792x1024" || size == "1024x1792") {
 		ratios["size"] = 1.666667
 	}
 	return ratios
