@@ -56,6 +56,9 @@ func TestResolveSecondsSnapsAndClamps(t *testing.T) {
 		{"veo31", 8, false, 8},      //
 		{"veo31-fast", 3, false, 4}, // below range -> 4
 		{"veo31", 99, false, 8},     // above range -> 8
+		{"veo31-ref", 4, false, 8},  // ref form is 8s only, whatever was asked
+		{"veo31-ref", 8, false, 8},
+		{"veo31-ref", 99, false, 8},
 		{"kling3", 15, false, 15},
 		{"kling3", 99, false, 15},  // clamp to 15
 		{"kling3", 1, false, 3},    // clamp to 3

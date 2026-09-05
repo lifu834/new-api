@@ -194,6 +194,11 @@ func resolveSeconds(model, secondsStr string, duration int, hasVideo bool) int {
 	}
 	m := strings.ToLower(strings.TrimSpace(model))
 	switch {
+	case strings.HasPrefix(m, "veo31-ref"):
+		// the reference-image form accepts 8s only ("Only 8 seconds duration
+		// is supported for this model"), unlike plain veo's 4/6/8 -- bill the
+		// duration that is actually produced, not the one that was asked for
+		return 8
 	case strings.HasPrefix(m, "veo31"):
 		// upstream only accepts 4 / 6 / 8 and snaps to the nearest
 		return snap(seconds, []int{4, 6, 8})
