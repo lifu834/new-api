@@ -18,12 +18,12 @@ func TestParseTaskResult_StatusMapping(t *testing.T) {
 	a := &TaskAdaptor{}
 
 	cases := []struct {
-		name        string
-		body        string
-		wantStatus  model.TaskStatus
-		wantUrl     string
-		wantTokens  int
-		wantReason  string
+		name         string
+		body         string
+		wantStatus   model.TaskStatus
+		wantUrl      string
+		wantTokens   int
+		wantReason   string
 		wantProgress string
 	}{
 		{

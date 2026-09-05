@@ -26,6 +26,7 @@ import (
 //     trips) but does NOT cancel an already-active cooldown. The cooldown runs its
 //     full duration by wall-clock. This avoids flapping on half-failing channels
 //     where sporadic successes are interleaved with errors.
+//
 // Tunable via package vars (kept as vars rather than consts so tests can use
 // short windows and ops could later promote them to env settings).
 var (
