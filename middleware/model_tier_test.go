@@ -27,7 +27,7 @@ func TestPixelsOfTierName(t *testing.T) {
 	cases := map[string]int{
 		"720p": 921600, "1080p": 2073600, "4K": 8294400, "2160p": 8294400,
 		"  1080P  ": 2073600, // 大小写与空白都要认
-		"": 0, "1080": 0, "16:9": 0, "foo": 0,
+		"":          0, "1080": 0, "16:9": 0, "foo": 0,
 	}
 	for name, want := range cases {
 		if got := pixelsOfTierName(name); got != want {
@@ -47,67 +47,43 @@ func ctxWith(t *testing.T, path, body string) *gin.Context {
 
 func TestWithTierSuffix(t *testing.T) {
 	cases := []struct{ name, path, model, body, want string }{
-		// —— banana：1024²=1.05M / 2048²=4.19M / 4096²=16.8M
-		{"banana 默认 1K", "/v1/images/generations", "nano-banana-pro",
-			`{"size":"1024x1024"}`, "nano-banana-pro"},
-		{"banana 2K", "/v1/images/generations", "nano-banana-pro",
-			`{"size":"2048x2048"}`, "nano-banana-pro-2k"},
-		{"banana 4K", "/v1/images/generations", "nano-banana-2",
-			`{"size":"4096x4096"}`, "nano-banana-2-4k"},
-		{"banana 16:9 4K", "/v1/images/generations", "nano-banana-pro",
-			`{"size":"3840x2160"}`, "nano-banana-pro-4k"},
+		// —— 260826：生图线也取消了裸名，改用 nano-banana-*-1k/-2k/-4k 六个显式 SKU
+		// ⇒ nano-banana 族已移出档位表，**不再有任何按 size 的改写**。
+		// 档位改由聚合层（image2api）按 SKU 名向上游强制下发，比按 size 猜更硬；
+		// 直连的 Gemini 渠道走 imageSizeFromModel，同样按模型名后缀钉。
+		{"banana 显式 1K 原样放过", "/v1/images/generations", "nano-banana-pro-1k",
+			`{"size":"1024x1024"}`, "nano-banana-pro-1k"},
+		{"banana 显式 2K 不因 size 变档", "/v1/images/generations", "nano-banana-pro-2k",
+			`{"size":"1024x1024"}`, "nano-banana-pro-2k"},
+		{"banana 显式 4K 不因 size 变档", "/v1/images/generations", "nano-banana-2-4k",
+			`{"size":"1024x1024"}`, "nano-banana-2-4k"},
+		// 关键回归：付 1K 却传 4096 的 size，**不再被自动升档**（也就不会按 4K 计费）。
+		// 收入不再靠这层隐式改写保护，而是靠 image2api 覆写尺寸：客户拿到的就是 1K。
+		{"banana 1K 传大 size 不升档", "/v1/images/generations", "nano-banana-2-1k",
+			`{"size":"4096x4096"}`, "nano-banana-2-1k"},
+		// 已废弃的裸名：不在任何渠道，中间件也不再认识它，原样放过后由路由层报错
+		{"废弃裸名 nano-banana-2 不再被改写", "/v1/images/generations", "nano-banana-2",
+			`{"size":"4096x4096"}`, "nano-banana-2"},
 
-		// —— kling：1280x720=921,600 / 1920x1080=2,073,600
-		{"kling 默认 720p", "/v1/videos", "kling-3.0",
-			`{"size":"1280x720","seconds":"5"}`, "kling-3.0"},
-		{"kling 1080p", "/v1/videos", "kling-3.0",
-			`{"size":"1920x1080","seconds":"5"}`, "kling-3.0-1080p"},
-		{"kling 竖版 1080p", "/v1/videos", "kling-3.0",
-			`{"size":"1080x1920","seconds":"5"}`, "kling-3.0-1080p"},
-		{"kling 不传 size 落最便宜档", "/v1/videos", "kling-3.0",
-			`{"seconds":"5"}`, "kling-3.0"},
-
-		// —— seedance（overseas）：基名即 720p 档
-		{"sd 默认 720p", "/v1/videos", "sd-2.0",
-			`{"duration":5}`, "sd-2.0"},
-		{"sd size 1080p", "/v1/videos", "sd-2.0",
-			`{"size":"1920x1080","duration":5}`, "sd-2.0-1080p"},
-		{"sd size 4K", "/v1/videos", "sd-2.0",
-			`{"size":"3840x2160","duration":5}`, "sd-2.0-4k"},
-		// 🔑 视频组客户用的是 resolution 字段，不是 size
-		{"sd resolution 1080p", "/v1/videos", "sd-2.0",
-			`{"resolution":"1080p","duration":5}`, "sd-2.0-1080p"},
-		{"sd resolution 4k", "/v1/videos", "sd-2.0",
-			`{"resolution":"4k","duration":5}`, "sd-2.0-4k"},
-		{"sd resolution 720p", "/v1/videos", "sd-2.0",
-			`{"resolution":"720p","duration":5}`, "sd-2.0"},
-		// ratio 不是分辨率，不能把它当尺寸解析
-		{"sd 只给 ratio 落最便宜档", "/v1/videos", "sd-2.0",
-			`{"ratio":"16:9","duration":5}`, "sd-2.0"},
-		// fast / mini 只有一档，任何分辨率都不加后缀
-		{"sd-fast 无档位阶梯", "/v1/videos", "sd-fast",
-			`{"resolution":"1080p"}`, "sd-fast"},
-		{"sd-mini 无档位阶梯", "/v1/videos", "sd-mini",
-			`{"size":"3840x2160"}`, "sd-mini"},
-		// 旧名是 Alias 不是基名，原样放过（显式请求仍然工作）
-		{"旧名 sd-2.0-720p 原样放过", "/v1/videos", "sd-2.0-720p",
-			`{"resolution":"1080p"}`, "sd-2.0-720p"},
-		{"旧名 sd-mini-720p 原样放过", "/v1/videos", "sd-mini-720p",
-			`{"size":"1280x720"}`, "sd-mini-720p"},
-		// resolution 也让 banana 能用档位串（原先只认 size）
-		{"banana resolution 4k", "/v1/images/generations", "nano-banana-pro",
-			`{"resolution":"4k"}`, "nano-banana-pro-4k"},
-
-		// —— 边界：显式档位名不是基名，不重复加后缀
-		{"显式 kling-3.0-1080p 原样放过", "/v1/videos", "kling-3.0-1080p",
-			`{"size":"1280x720"}`, "kling-3.0-1080p"},
-		{"显式 banana-4k 原样放过", "/v1/images/generations", "nano-banana-pro-4k",
-			`{"size":"1024x1024"}`, "nano-banana-pro-4k"},
-		// —— 非档位模型一律不碰
-		{"veo 不受影响", "/v1/videos", "veo-3.1",
-			`{"size":"1920x1080"}`, "veo-3.1"},
-		{"gpt-image-2 不受影响", "/v1/images/generations", "gpt-image-2",
-			`{"size":"3840x2160"}`, "gpt-image-2"},
+		// —— 260826：视频线取消裸名、改用显式分辨率名 ⇒ 不再有任何改写。
+		// 这些用例现在正向断言"原样放过"，包括过去会被改写的组合。
+		{"kling-3.0 不再按 size 改写", "/v1/videos", "kling-3.0",
+			`{"size":"1920x1080","seconds":"5"}`, "kling-3.0"},
+		{"kling-3.0-1080p 是显式 SKU，原样放过", "/v1/videos", "kling-3.0-1080p",
+			`{"size":"1280x720","seconds":"5"}`, "kling-3.0-1080p"},
+		{"sd-2.0-720p 原样放过", "/v1/videos", "sd-2.0-720p",
+			`{"resolution":"1080p","duration":5}`, "sd-2.0-720p"},
+		{"sd-2.0-1080p 原样放过", "/v1/videos", "sd-2.0-1080p",
+			`{"resolution":"720p","duration":5}`, "sd-2.0-1080p"},
+		{"sd-2.0-4k 原样放过", "/v1/videos", "sd-2.0-4k",
+			`{"duration":5}`, "sd-2.0-4k"},
+		{"sd-fast-720p 原样放过", "/v1/videos", "sd-fast-720p",
+			`{"resolution":"1080p"}`, "sd-fast-720p"},
+		{"sd-mini-720p 原样放过", "/v1/videos", "sd-mini-720p",
+			`{"size":"3840x2160"}`, "sd-mini-720p"},
+		// 已废弃的裸名：不在任何渠道，中间件也不再认识它，原样放过后由路由层报错
+		{"废弃裸名 sd-2.0 不再被改写", "/v1/videos", "sd-2.0",
+			`{"size":"3840x2160","duration":5}`, "sd-2.0"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

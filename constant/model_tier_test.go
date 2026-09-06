@@ -4,87 +4,87 @@ import "testing"
 
 func TestIsHiddenModel(t *testing.T) {
 	hidden := map[string]bool{
-		"nano-banana-pro-2k": true, "nano-banana-pro-4k": true,
-		"nano-banana-2-2k": true, "nano-banana-2-4k": true,
-		"kling-3.0-1080p": true,
-		"kling-3.0-720p":  true, // 历史别名，等同于基名
-		// 历史遗留重复名：同渠道同价，只是把供应商写在了名字里
+		// 只剩历史遗留重复名：同渠道同价，只是把供应商写进了名字里
 		"leonardo-kling-3.0": true, "leonardo-kling-3.0-turbo": true,
 		"leonardo-kling-o3": true, "leonardo-veo-3.1": true,
 		"leonardo-veo-3.1-fast": true,
-		// seedance（overseas）：档位 SKU 与三个历史别名
-		"sd-2.0-1080p": true, "sd-2.0-4k": true,
-		"sd-2.0-720p": true, "sd-fast-720p": true, "sd-mini-720p": true,
+		// 260826：生图线也取消了裸名（nano-banana-*-1k/-2k/-4k 六个显式 SKU），
+		// nano-banana 族随之移出档位表 ⇒ **2K/4K 不再被隐藏**。
+		// 此前它们是"基名+后缀拼出的内部 SKU"而被藏起来，客户根本发现不了在售的高档位；
+		// 视频线吃过同样的亏（sd-2.0-720p 等六个主力 SKU 一度整个消失）。
 	}
-	// 基名本身必须**可见**（那是对外唯一暴露的名字），无关模型也不该被隐藏
-	for _, m := range []string{"nano-banana-pro", "nano-banana-2", "kling-3.0",
-		"nano-banana-pro-2k", "nano-banana-pro-4k", "nano-banana-2-2k", "nano-banana-2-4k",
-		"kling-3.0-1080p", "kling-3.0-720p",
-		"kling-3.0-turbo", "kling-o3", "nano-banana-pro-8k", "gpt-image-2", "veo-3.1", "",
+	// 全部必须**可见**：显式 SKU 名就是对外名本身，无关模型也不该被误伤
+	for _, m := range []string{
+		// 生图六个在售 SKU
+		"nano-banana-2-1k", "nano-banana-2-2k", "nano-banana-2-4k",
+		"nano-banana-pro-1k", "nano-banana-pro-2k", "nano-banana-pro-4k",
+		// 已废弃的裸名：不在任何渠道，也不该被特殊对待
+		"nano-banana-pro", "nano-banana-2", "kling-3.0",
+		// 不存在的档位，不该被规则误判
+		"nano-banana-pro-8k",
+		"kling-3.0-1080p", "kling-3.0-720p", "kling-3.0-turbo", "kling-o3",
+		"gpt-image-2", "gpt-image-2-1k", "veo-3.1", "",
 		"leonardo-kling-3.0", "leonardo-kling-3.0-turbo", "leonardo-kling-o3",
 		"leonardo-veo-3.1", "leonardo-veo-3.1-fast",
 		"sd-2.0", "sd-fast", "sd-mini",
 		"sd-2.0-1080p", "sd-2.0-4k", "sd-2.0-720p", "sd-fast-720p", "sd-mini-720p",
-		"sd-2.5-720p", // 不属于任何档位族，不该被误隐藏
-		"leonardo-seedance-2.0-mini"} { // 已下架，不在隐藏名单里也无所谓
+		"sd-2.5-720p",
+		"leonardo-seedance-2.0-mini"} {
 		if got := IsHiddenModel(m); got != hidden[m] {
 			t.Errorf("IsHiddenModel(%q) = %v, want %v", m, got, hidden[m])
 		}
 	}
 }
 
-func TestSuffixForPixels(t *testing.T) {
-	banana, ok := TieredFamilyOf("nano-banana-pro")
-	if !ok {
-		t.Fatal("nano-banana-pro 应当是档位基名")
+// TestNoTieredFamilies 守住 260826 的决定：**全线改用显式分辨率 SKU 名**，
+// 档位不再由 size 隐式改写。这张表现在应当是空的。
+//
+// 之所以正向断言"空"而不是删掉测试：这张表一旦被重新填上，会同时恢复两个行为
+// —— 按 size 改写模型名、以及把 `基名+后缀` 的 SKU 从 /v1/models 隐藏。
+// 后者是真正有害的那个（藏掉在售 SKU），必须有测试挡着，不能靠记性。
+func TestNoTieredFamilies(t *testing.T) {
+	if len(TieredModelFamilies) != 0 {
+		t.Fatalf("TieredModelFamilies 应为空（全线用显式 SKU 名），实际有 %d 族",
+			len(TieredModelFamilies))
 	}
-	for px, want := range map[int]string{0: "", 1048576: "", 2073600: "-2k",
-		4194304: "-2k", 8294400: "-4k", 16777216: "-4k"} {
-		if got := banana.SuffixForPixels(px); got != want {
-			t.Errorf("banana.SuffixForPixels(%d) = %q, want %q", px, got, want)
-		}
-	}
-	kling, ok := TieredFamilyOf("kling-3.0")
-	if !ok {
-		t.Fatal("kling-3.0 应当是档位基名")
-	}
-	for px, want := range map[int]string{0: "", 921600: "", 2073600: "-1080p", 8294400: "-1080p"} {
-		if got := kling.SuffixForPixels(px); got != want {
-			t.Errorf("kling.SuffixForPixels(%d) = %q, want %q", px, got, want)
-		}
-	}
-	// kling-3.0-turbo 不是基名（它自己不分档）
-	if _, ok := TieredFamilyOf("kling-3.0-turbo"); ok {
-		t.Error("kling-3.0-turbo 不该被当成档位基名")
-	}
-
-	sd, ok := TieredFamilyOf("sd-2.0")
-	if !ok {
-		t.Fatal("sd-2.0 应当是档位基名")
-	}
-	for px, want := range map[int]string{
-		0: "", 921600: "", // 不传 / 720p → 基名本身
-		2073600: "-1080p", 3686400: "-1080p", // 1080p、2K 都落 1080p 档（没有 2K SKU）
-		8294400: "-4k", 33177600: "-4k",
+	// 曾经的基名，如今都不该再被当成档位基名
+	for _, m := range []string{
+		"nano-banana-pro", "nano-banana-2",
+		"kling-3.0", "sd-2.0", "sd-fast", "sd-mini", "kling-3.0-turbo",
 	} {
-		if got := sd.SuffixForPixels(px); got != want {
-			t.Errorf("sd.SuffixForPixels(%d) = %q, want %q", px, got, want)
+		if _, ok := TieredFamilyOf(m); ok {
+			t.Errorf("%q 不该再是档位基名（260826 起全线用显式分辨率名）", m)
 		}
 	}
-	// fast / mini 只有一档：任何像素数都不加后缀
-	fast, ok := TieredFamilyOf("sd-fast")
-	if !ok {
-		t.Fatal("sd-fast 应当是档位基名")
-	}
-	for _, px := range []int{0, 921600, 2073600, 8294400} {
-		if got := fast.SuffixForPixels(px); got != "" {
-			t.Errorf("sd-fast.SuffixForPixels(%d) = %q, want \"\"", px, got)
-		}
-	}
-	// 旧名不是基名，显式请求时不该再被加后缀
-	for _, m := range []string{"sd-2.0-720p", "sd-fast-720p", "sd-mini-720p", "sd-2.0-4k"} {
+	// 反向不变量：显式 SKU 名任何情况下都不该被当成基名，
+	// 否则会被二次加后缀（nano-banana-2-2k-4k / sd-2.0-720p-1080p 这种）
+	for _, m := range []string{
+		"nano-banana-2-1k", "nano-banana-2-2k", "nano-banana-2-4k",
+		"nano-banana-pro-1k", "nano-banana-pro-2k", "nano-banana-pro-4k",
+		"sd-2.0-720p", "sd-2.0-1080p", "sd-2.0-4k",
+		"sd-fast-720p", "sd-mini-720p",
+		"kling-3.0-1080p", "kling-3.0-720p",
+	} {
 		if _, ok := TieredFamilyOf(m); ok {
 			t.Errorf("%q 不该被当成档位基名", m)
+		}
+	}
+}
+
+// TestSuffixForPixels 档位阶梯本身的算法没变（将来真有"一个基名多档位"的上游
+// 还会用到），用一个**本地构造**的族来测，不依赖生产表的内容。
+func TestSuffixForPixels(t *testing.T) {
+	f := TieredModelFamily{
+		Bases: []string{"demo"},
+		Tiers: []ModelTier{{0, ""}, {2_000_000, "-2k"}, {6_000_000, "-4k"}},
+	}
+	for px, want := range map[int]string{
+		0: "", 1048576: "", 2073600: "-2k", 4194304: "-2k",
+		// 3840x2160 = 8,294,400 是我们的真 4K 判据，必须落 -4k 而不是 -2k
+		8294400: "-4k", 16777216: "-4k",
+	} {
+		if got := f.SuffixForPixels(px); got != want {
+			t.Errorf("SuffixForPixels(%d) = %q, want %q", px, got, want)
 		}
 	}
 }

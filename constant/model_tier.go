@@ -31,43 +31,19 @@ type TieredModelFamily struct {
 // 档位分界取"能把常见尺寸分对"的位置，不取几何中点——
 // 中点会把 3840x2160（8,294,400，正是我们的真 4K 判据）错分到 2K 档。
 var TieredModelFamilies = []TieredModelFamily{
-	{
-		// nano-banana：1024²=1.05M / 2048²=4.19M / 4096²=16.8M
-		Bases: []string{"nano-banana-pro", "nano-banana-2"},
-		Tiers: []ModelTier{{0, ""}, {2_000_000, "-2k"}, {6_000_000, "-4k"}},
-	},
-	{
-		// kling：1280x720=921,600 / 1920x1080=2,073,600
-		// ⚠️ 两家上游的分辨率机制不同：rolldek 编在模型名里
-		// （kling-3.0-omni-720p/-1080p），leo 靠请求体里的 size 透传。
-		// 改写模型名同时满足两者：rolldek 靠 model_mapping 拿到对应上游名，
-		// leo 则因为客户原本的 size 还在请求体里而自然出对应分辨率。
-		Bases:   []string{"kling-3.0"},
-		Tiers:   []ModelTier{{0, ""}, {1_500_000, "-1080p"}},
-		Aliases: []string{"kling-3.0-720p"},
-	},
-	{
-		// seedance（overseas 组）：1280x720=921,600 / 1920x1080=2,073,600 /
-		// 3840x2160=8,294,400。基名本身即 720p 档（dimensio 的 defaultResName
-		// 也是 720p），与 ¥0.88/秒 的定价对齐。
-		//
-		// 这一族原本走的是相反的约定——分辨率写死在对外名里、并**拒绝**
-		// `resolution` 参数，理由同样是防止"付 1080p 拿 720p"。档位中间件
-		// 出现得更晚，它用改写模型名的方式给出同一个保证（计价/选渠道/日志
-		// 看到的都是解析后的 SKU），于是参数可以放开了。
-		// 旧的五个名字只隐藏、不摘除，在用的客户不受影响。
-		Bases:   []string{"sd-2.0"},
-		Tiers:   []ModelTier{{0, ""}, {1_500_000, "-1080p"}, {6_000_000, "-4k"}},
-		Aliases: []string{"sd-2.0-720p"},
-	},
-	{
-		// sd-fast / sd-mini 上游只有 720p 一档，没有档位阶梯。
-		// 纳入本表只为把 "-720p" 这个赘余后缀从对外名里去掉，
-		// 让 overseas 三个档的对外形态一致（sd-2.0 / sd-fast / sd-mini）。
-		Bases:   []string{"sd-fast", "sd-mini"},
-		Tiers:   []ModelTier{{0, ""}},
-		Aliases: []string{"sd-fast-720p", "sd-mini-720p"},
-	},
+	// 260826：**已清空**。视频四族与生图 nano-banana 族先后移除，全线改用显式
+	// 分辨率 SKU 名（kling-3.0-720p / nano-banana-2-1k / …）。
+	//
+	// 为什么不留着：这张表同时驱动两件事 —— 按 size 隐式改写模型名，以及把
+	// "基名+后缀"的 SKU 从 /v1/models 隐藏。显式命名之后前者纯属多余，后者则
+	// 直接有害：它会把真实在售的 2K/4K 主力 SKU 藏起来，客户发现不了。
+	// 视频线就吃过这个亏（sd-2.0-720p 等六个 SKU 一度整个消失）。
+	//
+	// 原先"防止付 1K 拿 4K"的保证没有丢，只是换了承担者：档位现在由客户选的
+	// SKU 名决定，再由聚合层（image2api / video2api）向上游**强制下发**尺寸，
+	// 比按 size 猜更硬；直连的 Gemini 渠道则走 imageSizeFromModel，同样按名字钉。
+	//
+	// 结构保留（而非删掉整个类型）是为了将来真有"一个基名多档位"的上游时能直接用。
 }
 
 // TieredFamilyOf 返回该模型名所属的档位族（仅当它是对外基名时）。
