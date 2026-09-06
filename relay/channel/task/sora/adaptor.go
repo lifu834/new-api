@@ -96,6 +96,26 @@ func (a *TaskAdaptor) ValidateRequestAndSetAction(c *gin.Context, info *relaycom
 	return relaycommon.ValidateMultipartDirect(c, info)
 }
 
+// defaultSeconds 是客户没传时长时的计费秒数，必须与**该上游实际生成**的默认时长一致，
+// 否则就是"计 N 秒、生 M 秒"。按模型族查，不认识的一律沿用 Sora 的 4，不猜：
+//
+//	· video2api 的 SKU（sd-* / kling-* / veo-* / seedance / minimax）生成默认 5 秒；
+//	· leonardo2api 的 leonardo-* 生成默认 8 秒（app.py: body.get("seconds") or 8）——
+//	  260903 曾把非 Sora 一律记成 5，对这条渠道每单少收 3 秒；
+//	· sora-* 与其余未知渠道（如 yunshu，缺省时长未查证）保持 4。
+func defaultSeconds(model string) int {
+	m := strings.ToLower(model)
+	switch {
+	case strings.HasPrefix(m, "leonardo-"):
+		return 8
+	case strings.HasPrefix(m, "sd-"), strings.HasPrefix(m, "kling-"), strings.HasPrefix(m, "veo-"),
+		strings.HasPrefix(m, "seedance"), strings.HasPrefix(m, "minimax"):
+		return 5
+	default:
+		return 4
+	}
+}
+
 // EstimateBilling 根据用户请求的 seconds 和 size 计算 OtherRatios。
 func (a *TaskAdaptor) EstimateBilling(c *gin.Context, info *relaycommon.RelayInfo) map[string]float64 {
 	// remix 路径的 OtherRatios 已在 ResolveOriginTask 中设置
@@ -108,11 +128,10 @@ func (a *TaskAdaptor) EstimateBilling(c *gin.Context, info *relaycommon.RelayInf
 		return nil
 	}
 
-	// 260903: 这个 adaptor 服务的绝大多数渠道不是 Sora（video2api / leonardo2api / yunshu 等
-	// 同形态 /v1/videos 渠道也是 type=55），它们的分辨率与价格都钉在模型名里：
-	//   · 默认时长必须与 video2api 的生成默认(5s)一致，否则客户不传 duration 时"计 4 秒、生 5 秒"；
-	//   · Sora 的 1792x1024 / 1024x1792 ×1.667 尺寸系数只对真 Sora 模型有意义，
-	//     对 SKU 计价的渠道会让照 Sora 习惯传 size 的客户莫名多付 67%。
+	// 这个 adaptor 服务的绝大多数渠道不是 Sora（video2api / leonardo2api / yunshu 等
+	// 同形态 /v1/videos 渠道也是 type=55），它们的分辨率与价格都钉在模型名里。
+	// Sora 的 1792x1024 / 1024x1792 ×1.667 尺寸系数只对真 Sora 模型有意义，
+	// 对 SKU 计价的渠道会让照 Sora 习惯传 size 的客户莫名多付 67%。
 	isSora := strings.HasPrefix(strings.ToLower(req.Model), "sora")
 
 	seconds, _ := strconv.Atoi(req.Seconds)
@@ -120,11 +139,7 @@ func (a *TaskAdaptor) EstimateBilling(c *gin.Context, info *relaycommon.RelayInf
 		seconds = req.Duration
 	}
 	if seconds <= 0 {
-		if isSora {
-			seconds = 4
-		} else {
-			seconds = 5
-		}
+		seconds = defaultSeconds(req.Model)
 	}
 
 	size := req.Size
@@ -149,10 +164,19 @@ func (a *TaskAdaptor) BuildRequestURL(info *relaycommon.RelayInfo) (string, erro
 	return fmt.Sprintf("%s/v1/videos", a.baseURL), nil
 }
 
+// browserUA 让出站请求带上浏览器指纹。部分上游（如 xiaoyi）在 Cloudflare 后面按 UA
+// 拦截，对 Go 默认的 Go-http-client/2.0 回 403 "error code: 1010" —— 提交和轮询都会中招，
+// 而轮询拿到 403 HTML 后 ParseTaskResult 报的是 "unmarshal task result failed"，
+// 极易被误读成解析逻辑的 bug。
+// （260824 在生产树上直接改的，260906 回流进仓库。）
+const browserUA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
+	"(KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36"
+
 // BuildRequestHeader sets required headers.
 func (a *TaskAdaptor) BuildRequestHeader(c *gin.Context, req *http.Request, info *relaycommon.RelayInfo) error {
 	req.Header.Set("Authorization", "Bearer "+a.apiKey)
 	req.Header.Set("Content-Type", c.Request.Header.Get("Content-Type"))
+	req.Header.Set("User-Agent", browserUA)
 	return nil
 }
 
@@ -284,6 +308,7 @@ func (a *TaskAdaptor) FetchTask(baseUrl, key string, body map[string]any, proxy 
 	}
 
 	req.Header.Set("Authorization", "Bearer "+key)
+	req.Header.Set("User-Agent", browserUA)
 
 	client, err := service.GetHttpClientWithProxy(proxy)
 	if err != nil {
