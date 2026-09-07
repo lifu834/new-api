@@ -36,8 +36,8 @@ type Pricing struct {
 	BillingMode            string                  `json:"billing_mode,omitempty"`
 	BillingExpr            string                  `json:"billing_expr,omitempty"`
 	// BillingUnit 仅按次模型（QuotaType=1）有值：second / call / mixed，见 constant.TaskBillingUnit
-	BillingUnit            string                  `json:"billing_unit,omitempty"`
-	PricingVersion         string                  `json:"pricing_version,omitempty"`
+	BillingUnit    string `json:"billing_unit,omitempty"`
+	PricingVersion string `json:"pricing_version,omitempty"`
 }
 
 type PricingVendor struct {
@@ -319,7 +319,7 @@ func updatePricing() {
 			pricing.ModelPrice = modelPrice
 			pricing.QuotaType = 1
 			if cts, ok := modelChannelTypes[model]; ok {
-				pricing.BillingUnit = constant.TaskBillingUnit(cts.Items())
+				pricing.BillingUnit = constant.TaskBillingUnitForModel(model, cts.Items())
 			}
 		} else {
 			modelRatio, _, _ := ratio_setting.GetModelRatio(model)

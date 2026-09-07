@@ -22,3 +22,19 @@ func TestTaskBillingUnit(t *testing.T) {
 		}
 	}
 }
+
+func TestTaskBillingUnitForModel_PerCallSKU(t *testing.T) {
+	sora := []int{ChannelTypeSora}
+	if got := TaskBillingUnitForModel("seedance-2.0", sora); got != BillingUnitCall {
+		t.Errorf("seedance-2.0 on sora channel: got %s want call", got)
+	}
+	if got := TaskBillingUnitForModel("MiniMax-H3-2k", sora); got != BillingUnitCall {
+		t.Errorf("minimax case-insensitive: got %s want call", got)
+	}
+	if got := TaskBillingUnitForModel("sd-2.5-720p", sora); got != BillingUnitSecond {
+		t.Errorf("sd-2.5-720p stays per-second: got %s", got)
+	}
+	if IsPerCallVideoSKU("seedance-2.0-fast-720p") {
+		t.Errorf("prefix must not match: only exact SKU names are per-call")
+	}
+}

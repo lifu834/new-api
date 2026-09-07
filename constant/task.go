@@ -1,5 +1,7 @@
 package constant
 
+import "strings"
+
 type TaskPlatform string
 
 const (
@@ -40,6 +42,28 @@ var perSecondTaskChannelTypes = map[int]bool{
 }
 
 func IsPerSecondTaskChannel(channelType int) bool { return perSecondTaskChannelTypes[channelType] }
+
+// 按次一口价的视频 SKU：挂在按秒渠道（type 55 video2api）上，但卖的是「一条片子」，
+// 不乘时长。依据：站内文档承诺「时长不影响价格」+ 8 月实扣口径（seedance-2.0 1425000 /
+// minimax-h3-2k 1750000 quota = 1× 标价）。260907 发现它们迁到 #201 后 sora 适配器会乘
+// 缺省 5 秒 ⇒ 多收 5 倍，故在此白名单。sora 适配器 EstimateBilling 与 /api/pricing 的
+// billing_unit 共用这一份，两边不会再各说各话。精确模型名匹配（小写）。
+var perCallVideoSKUs = map[string]bool{
+	"seedance-2.0":  true,
+	"minimax-h3-2k": true,
+}
+
+func IsPerCallVideoSKU(model string) bool {
+	return perCallVideoSKUs[strings.ToLower(strings.TrimSpace(model))]
+}
+
+// TaskBillingUnitForModel 在渠道判定之上叠加按次 SKU 白名单——pricing 应调用这个而不是 TaskBillingUnit。
+func TaskBillingUnitForModel(model string, channelTypes []int) string {
+	if IsPerCallVideoSKU(model) {
+		return BillingUnitCall
+	}
+	return TaskBillingUnit(channelTypes)
+}
 
 // TaskBillingUnit 汇总一个模型所有启用渠道的计费单位。
 func TaskBillingUnit(channelTypes []int) string {

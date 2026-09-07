@@ -128,6 +128,16 @@ func (a *TaskAdaptor) EstimateBilling(c *gin.Context, info *relaycommon.RelayInf
 		return nil
 	}
 
+	// 按次一口价 SKU（seedance-2.0 / minimax-h3-2k）：不乘时长，按标价收一次。
+	// 白名单在 constant.IsPerCallVideoSKU，与 /api/pricing 的 billing_unit 同源。
+	perCallModel := info.OriginModelName
+	if perCallModel == "" {
+		perCallModel = req.Model
+	}
+	if constant.IsPerCallVideoSKU(perCallModel) {
+		return nil
+	}
+
 	// 这个 adaptor 服务的绝大多数渠道不是 Sora（video2api / leonardo2api / yunshu 等
 	// 同形态 /v1/videos 渠道也是 type=55），它们的分辨率与价格都钉在模型名里。
 	// Sora 的 1792x1024 / 1024x1792 ×1.667 尺寸系数只对真 Sora 模型有意义，
