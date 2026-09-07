@@ -1,7 +1,6 @@
 package controller
 
 import (
-	"encoding/json"
 	"io"
 	"net/http"
 	"os"
@@ -59,7 +58,7 @@ func WebVitalsBeacon(c *gin.Context) {
 		return
 	}
 	var in map[string]any
-	if err := json.Unmarshal(body, &in); err != nil {
+	if err := common.Unmarshal(body, &in); err != nil {
 		return
 	}
 	if t, _ := in["type"].(string); t != "web_vitals" {
@@ -133,7 +132,7 @@ func webVitalsBaseDir() string {
 }
 
 func appendWebVitals(rec map[string]any) error {
-	line, err := json.Marshal(rec)
+	line, err := common.Marshal(rec)
 	if err != nil {
 		return err
 	}
