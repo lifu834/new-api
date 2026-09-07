@@ -35,6 +35,8 @@ type Pricing struct {
 	SupportedEndpointTypes []constant.EndpointType `json:"supported_endpoint_types"`
 	BillingMode            string                  `json:"billing_mode,omitempty"`
 	BillingExpr            string                  `json:"billing_expr,omitempty"`
+	// BillingUnit 仅按次模型（QuotaType=1）有值：second / call / mixed，见 constant.TaskBillingUnit
+	BillingUnit            string                  `json:"billing_unit,omitempty"`
 	PricingVersion         string                  `json:"pricing_version,omitempty"`
 }
 
@@ -189,6 +191,8 @@ func updatePricing() {
 	}
 
 	modelGroupsMap := make(map[string]*types.Set[string])
+	// 模型 → 承接它的渠道类型集合（计费单位按渠道类型判定，见 constant.TaskBillingUnit）
+	modelChannelTypes := make(map[string]*types.Set[int])
 
 	for _, ability := range enableAbilities {
 		groups, ok := modelGroupsMap[ability.Model]
@@ -197,6 +201,12 @@ func updatePricing() {
 			modelGroupsMap[ability.Model] = groups
 		}
 		groups.Add(ability.Group)
+		cts, ok := modelChannelTypes[ability.Model]
+		if !ok {
+			cts = types.NewSet[int]()
+			modelChannelTypes[ability.Model] = cts
+		}
+		cts.Add(ability.ChannelType)
 	}
 
 	//这里使用切片而不是Set，因为一个模型可能支持多个端点类型，并且第一个端点是优先使用端点
@@ -308,6 +318,9 @@ func updatePricing() {
 		if findPrice {
 			pricing.ModelPrice = modelPrice
 			pricing.QuotaType = 1
+			if cts, ok := modelChannelTypes[model]; ok {
+				pricing.BillingUnit = constant.TaskBillingUnit(cts.Items())
+			}
 		} else {
 			modelRatio, _, _ := ratio_setting.GetModelRatio(model)
 			pricing.ModelRatio = modelRatio
