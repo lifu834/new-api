@@ -53,6 +53,8 @@ func SetApiRouter(router *gin.Engine) {
 		// Standard OAuth providers (GitHub, Discord, OIDC, LinuxDO) - unified route
 		apiRouter.GET("/oauth/:provider", middleware.CriticalRateLimit(), controller.HandleOAuth)
 		apiRouter.GET("/ratio_config", middleware.CriticalRateLimit(), controller.GetRatioConfig)
+		// 前端 Core Web Vitals 信标（匿名；落 log-dir/web-vitals/*.jsonl 供 Channel Ops 聚合）
+		apiRouter.POST("/log/web-vitals", middleware.CriticalRateLimit(), controller.WebVitalsBeacon)
 
 		apiRouter.POST("/stripe/webhook", controller.StripeWebhook)
 		apiRouter.POST("/creem/webhook", controller.CreemWebhook)
