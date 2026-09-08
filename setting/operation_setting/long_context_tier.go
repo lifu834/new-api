@@ -17,13 +17,17 @@ import (
 // 我方上游(sub2api,组开关 long_context_pricing_enabled 全开)成本侧已按该阶梯**真实扣费**,
 // 营收侧若不跟进,该档必亏(260908 实测毛利 −41%,而普通档 +33%)。
 //
-// 判据用 PromptTokens(含 cache tokens),与上游 input_tokens+cache_read_tokens 同口径。
+// 判据用 PromptTokens(含 cache tokens),与上游 sub2api 的
+// `InputTokens + CacheCreationTokens + CacheReadTokens` 同口径(见其 shouldApplySessionLongContextPricing)。
+// Inclusive: 默认 false = 严格大于(OpenAI 系);grok 系上游用 >= ,需显式置 true。
 // 空列表 = 功能关闭。倍数 <1 视为配置错误并忽略(防止把阶梯写成打折)。
 type LongContextTier struct {
 	Prefix     string  `json:"prefix"`
 	Threshold  int     `json:"threshold"`
 	InputMult  float64 `json:"input_mult"`
 	OutputMult float64 `json:"output_mult"`
+	// Inclusive=true 时"达到阈值即适用"(>=),对齐 grok 系;默认 false 为严格大于,对齐 OpenAI 系。
+	Inclusive bool `json:"inclusive"`
 }
 
 var LongContextTiers = []LongContextTier{}
@@ -79,7 +83,11 @@ func MatchLongContextTier(model string, promptTokens int) *LongContextTier {
 		if !strings.HasPrefix(model, t.Prefix) {
 			continue
 		}
-		if promptTokens <= t.Threshold {
+		if t.Inclusive {
+			if promptTokens < t.Threshold {
+				continue
+			}
+		} else if promptTokens <= t.Threshold {
 			continue
 		}
 		if hit == nil || t.Threshold > hit.Threshold {

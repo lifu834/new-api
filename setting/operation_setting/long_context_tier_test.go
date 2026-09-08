@@ -129,3 +129,26 @@ func TestLongContextTierBadJSON(t *testing.T) {
 		t.Fatal("非法 JSON 应报错(让保存操作失败,而不是静默清空规则)")
 	}
 }
+
+func TestLongContextTierInclusive(t *testing.T) {
+	resetTiers()
+	defer resetTiers()
+	// grok 系上游用「达到即适用」(>=),需显式 inclusive
+	if err := LongContextTiersFromString(`[{"prefix":"grok","threshold":200000,"input_mult":2,"output_mult":2,"inclusive":true}]`); err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if MatchLongContextTier("grok-4.5", 200000) == nil {
+		t.Fatal("inclusive 下等于阈值应命中")
+	}
+	if MatchLongContextTier("grok-4.5", 199999) != nil {
+		t.Fatal("低于阈值仍不应命中")
+	}
+	// 对照:非 inclusive 的 OpenAI 系等于阈值不命中
+	resetTiers()
+	if err := LongContextTiersFromString(`[{"prefix":"gpt-5.6","threshold":272000,"input_mult":2,"output_mult":1.5}]`); err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if MatchLongContextTier("gpt-5.6-sol", 272000) != nil {
+		t.Fatal("非 inclusive 下等于阈值不应命中")
+	}
+}
