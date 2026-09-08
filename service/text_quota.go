@@ -28,6 +28,9 @@ type textQuotaSummary struct {
 	CacheCreationTokens5m    int
 	CacheCreationTokens1h    int
 	CacheCreationSynthetic   bool
+	LongContextThreshold     int
+	LongContextInputMult     float64
+	LongContextOutputMult    float64
 	ImageTokens              int
 	AudioTokens              int
 	ModelName                string
@@ -292,6 +295,18 @@ func calculateTextQuotaSummary(ctx *gin.Context, relayInfo *relaycommon.RelayInf
 		}
 		promptQuota := baseTokens.Add(cachedTokensWithRatio).Add(imageTokensWithRatio).Add(cachedCreationTokensWithRatio)
 		completionQuota := dCompletionTokens.Mul(dCompletionRatio)
+
+		// 长上下文阶梯:超阈值的请求整单按高档单价计(输入/缓存读/缓存写同乘 InputMult,输出乘 OutputMult),
+		// 与上游成本侧口径一致(见 operation_setting.LongContextTier)。判据用 PromptTokens(含 cache tokens)。
+		// 工具调用附加费与音频输入不参与——前者与上下文长度无关,后者按独立单价另算。
+		if tier := operation_setting.MatchLongContextTier(summary.ModelName, summary.PromptTokens); tier != nil {
+			promptQuota = promptQuota.Mul(decimal.NewFromFloat(tier.InputMult))
+			completionQuota = completionQuota.Mul(decimal.NewFromFloat(tier.OutputMult))
+			summary.LongContextThreshold = tier.Threshold
+			summary.LongContextInputMult = tier.InputMult
+			summary.LongContextOutputMult = tier.OutputMult
+		}
+
 		quotaCalculateDecimal := promptQuota.Add(completionQuota).Mul(ratio)
 		quotaCalculateDecimal = quotaCalculateDecimal.Add(summary.ToolCallSurchargeQuota)
 		quotaCalculateDecimal = quotaCalculateDecimal.Add(audioInputQuota)
@@ -454,6 +469,12 @@ func PostTextConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, us
 	if summary.CacheCreationSynthetic {
 		// 该缓存写量为本站按「未命中输入」推定(上游未申报),对账时与真实申报区分
 		other["cache_creation_synthetic"] = true
+	}
+	if summary.LongContextThreshold > 0 {
+		// 让客户在账单明细里看得见"为什么这单更贵",也便于对账
+		other["long_context_threshold"] = summary.LongContextThreshold
+		other["long_context_input_ratio"] = summary.LongContextInputMult
+		other["long_context_output_ratio"] = summary.LongContextOutputMult
 	}
 	if summary.CacheCreationTokens5m > 0 {
 		other["cache_creation_tokens_5m"] = summary.CacheCreationTokens5m
