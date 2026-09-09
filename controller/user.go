@@ -414,6 +414,14 @@ func GetSelf(c *gin.Context) {
 	// 获取用户设置并提取sidebar_modules
 	userSetting := user.GetSetting()
 
+	// 累计充值：会员档位按它核定（见 model.GetUserRechargeQuota）。取不到不算致命——
+	// 前端只是画不出晋级进度条，档位本身由后端 tier-scan 定，所以吞掉错误按 0 返回。
+	rechargeQuota, err := model.GetUserRechargeQuota(id)
+	if err != nil {
+		common.SysLog("GetUserRechargeQuota failed: " + err.Error())
+		rechargeQuota = 0
+	}
+
 	// 构建响应数据，包含用户信息和权限
 	responseData := map[string]interface{}{
 		"id":                user.Id,
@@ -430,6 +438,7 @@ func GetSelf(c *gin.Context) {
 		"group":             user.Group,
 		"quota":             user.Quota,
 		"used_quota":        user.UsedQuota,
+		"recharge_quota":    rechargeQuota,
 		"request_count":     user.RequestCount,
 		"aff_code":          user.AffCode,
 		"aff_count":         user.AffCount,

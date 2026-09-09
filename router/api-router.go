@@ -55,6 +55,8 @@ func SetApiRouter(router *gin.Engine) {
 		apiRouter.GET("/ratio_config", middleware.CriticalRateLimit(), controller.GetRatioConfig)
 		// 前端 Core Web Vitals 信标（匿名；落 log-dir/web-vitals/*.jsonl 供 Channel Ops 聚合）
 		apiRouter.POST("/log/web-vitals", middleware.CriticalRateLimit(), controller.WebVitalsBeacon)
+		// 会员四档门槛与逐分组倍率（匿名；会员页/兑换页并排展示四档差价用）
+		apiRouter.GET("/membership/tiers", middleware.CriticalRateLimit(), controller.GetMembershipTiers)
 
 		apiRouter.POST("/stripe/webhook", controller.StripeWebhook)
 		apiRouter.POST("/creem/webhook", controller.CreemWebhook)
