@@ -33,6 +33,16 @@ func ResolveIncomingBillingExprRequestInput(c *gin.Context, info *relaycommon.Re
 	if err != nil {
 		return billingexpr.RequestInput{}, err
 	}
+	// multipart 请求（同步 /v1/images/edits）的原始 body 不是 JSON，读出来是空的，
+	// 于是 param("size") 取到 nil —— 按尺寸分档的表达式要么崩、要么全部落到"缺省档"少收钱。
+	// 此时改用**已解析的请求对象**当计费体：size 等字段都在里面，且与真正发往上游的参数同源。
+	// （异步任务链路早有等价处理，见 task/chatgpt2api 的 injectBillingSizeForEdits；
+	//   这里补的是同步链路那一半。）
+	if len(bodyBytes) == 0 && info != nil && info.Request != nil {
+		if parsed, perr := common.Marshal(info.Request); perr == nil {
+			bodyBytes = parsed
+		}
+	}
 	input.Body = bodyBytes
 	if info != nil {
 		if input.Headers == nil {
